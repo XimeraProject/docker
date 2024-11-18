@@ -45,7 +45,7 @@ jobs:
         docker buildx build \
           --cache-from=type=local,src=/tmp/.buildx-cache \
           --cache-to=type=local,dest=/tmp/.buildx-cache,mode=max \
-          --tag ghcr.io/ximeraProject/xake2024:${{ github.ref_name }}-full \
+          --tag ghcr.io/ximeraproject/xake2024:${{ github.ref_name }}-full \
           --file xake/Dockerfile.2024 \
           --push .
 
@@ -55,7 +55,7 @@ jobs:
         docker buildx build \
           --cache-from=type=local,src=/tmp/.buildx-cache \
           --cache-to=type=local,dest=/tmp/.buildx-cache,mode=max \
-          --tag ghcr.io/ximeraProject/xake2024:${{ github.ref_name }}-medium \
+          --tag ghcr.io/ximeraproject/xake2024:${{ github.ref_name }}-medium \
           --file xake/Dockerfile.2024medium \
           --push .
 
