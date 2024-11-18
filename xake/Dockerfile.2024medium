@@ -1,73 +1,23 @@
-# FROM texlive/texlive
-FROM registry.gitlab.com/islandoftex/images/texlive:TL2024-2024-09-15-medium
-
+FROM registry.gitlab.com/islandoftex/images/texlive:TL2024-2024-11-17-medium
 
 RUN apt-get update -y  
-# && apt-get upgrade -y
 
-# Build tools
-# RUN apt-get install -y make cmake pkg-config
-## RUN apt-get install -y perl-modules
 RUN apt-get install -y \
-      curl \
-      git \
-      git-restore-mtime  \
-      mupdf-tools pdf2svg \ 
-      # imagemagick \
-      # libncurses6 \
-      vim wget strace gnupg
+    curl \
+    git  git-restore-mtime \
+    mupdf-tools pdf2svg imagemagick \
+    gnupg \
+    vim wget strace less 
 
 
-# ENV PATH="${PATH}:/opt/texlive/bin/x86_64-linux"
+# Install xake (from repo)
+ADD scripts/xake.bin /usr/local/bin/xake
 
-# SageMath
-# RUN DEBIAN_FRONTEND=noninteractive apt-get -y install sagemath
-
-# Install node and MathJaxTest
-# WORKDIR /root
-# RUN apt-get install -y nodejs npm
-# ADD htmlMathJaxTest /root/htmlMathJaxTest
-# RUN cd /root/htmlMathJaxTest && npm install
-
-# Install git2go 
-# RUN mkdir -p /root/go/src/github.com/libgit2
-# WORKDIR /root/go/src/github.com/libgit2
-# RUN git clone https://github.com/libgit2/git2go.git
-# WORKDIR git2go
-# RUN git submodule update --init
-
-# RUN apt-get install -y python3 
-
-# # RUN make install-static
-
-
-# ENV GOPATH=/root/go
-# ENV PKG_CONFIG_PATH=/root/go/src/github.com/libgit2/git2go/static-build/install/lib/pkgconfig
-# ENV CGO_CFLAGS=-I/root/go/src/github.com/libgit2/git2go/static-build/install/include
-
-# Build and install xake
-# RUN mkdir -p /root/go/src/github.com/ximeraproject/xake
-# WORKDIR /root/go/src/github.com/ximeraproject/xake
-
-RUN  tlmgr install cancel enumitem titlesec titling url pgfplots forloop environ  xifthen multido ifmtarg gettitlestring comment
-
-# If you want to build from your current directory
-# ADD ./xake/xake /root/go/src/github.com/ximeraproject/xake/xake
-
-# If you want to build a specific repo/branch
-# RUN git clone https://github.com/XimeraProject/xake.git
-# WORKDIR xake
-# RUN git checkout development
-
-# Build xake
-# WORKDIR /root/go/src/github.com/ximeraproject/xake/xake
-# RUN go mod init
-# RUN go mod tidy
-# RUN go install . 
-# RUN ln -s /root/go/bin/xake /usr/bin/xake
-# Mmm, mathjaxtest DOES NOT WORK ....!
-# RUN apt-get install -y node-mathjax-full
-# RUN ln -s /root/go/src/github.com/ximeraproject/xake/xake/htmlMathJaxTest /root/htmlMathJaxTest
+# Extra packages (on top of 'medium')
+RUN tlmgr install \
+    circuitikz \
+    tikz-3dplot tikz-cd tkz-euclide \
+    xstring
 
 # Add ximeraLatex repo
 RUN mkdir -p /root/texmf/tex/latex
@@ -75,20 +25,10 @@ WORKDIR /root/texmf/tex/latex
 
 RUN git clone https://github.com/XimeraProject/ximeraLatex.git 
 WORKDIR /root/texmf/tex/latex/ximeraLatex
-RUN git  pull && git  checkout development
-
-# ADD ./ximeraLatex /root/texmf/tex/latex/ximeraLatex
-
+RUN git pull && git checkout development
 
 ADD scripts/xmlatex /usr/local/bin/xmlatex
-# RUN ln -s /root/go/bin/xake /usr/local/bin/xake
-ADD scripts/xake.bin /usr/local/bin/xake
-
-# Should NOT be done in a devcontainer !!!
-#RUN git config --global user.name "Xake Container"
-#RUN git config --global user.email "xake@xake.test" 
 
 RUN git config --global --add safe.directory /code
-
 
 WORKDIR /code

@@ -1,38 +1,70 @@
-name: Docker Image CI
+name: Build and Publish Docker Image on Tag
 
 on:
   push:
-    branches: [ "master" ]
-    paths:
-      # - 'xake/Dockerfile.2019'
-      # - 'xake/Dockerfile.2023'
-      - 'xake/Dockerfile.2024'
-  # pull_request:
-  #   branches: [ "master" ]
+    tags:
+      - 'v*'  # Trigger the workflow when a new tag starting with 'v' is pushed
 
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    # - name: Build the Docker image 2019
-    #   run: docker build . --file xake/Dockerfile.2019 --tag ghcr.io/ximeraproject/xake2019:latest
-    # - name: Build the Docker image 2023
-    #   run: docker build . --file xake/Dockerfile.2023 --tag ghcr.io/ximeraproject/xake2023:latest
-    - name: Build the Docker image 2024
-      run: docker build . --file xake/Dockerfile.2024 --tag ghcr.io/ximeraproject/xake2024:build
+    # Step 1: Set up Docker Buildx (supports layer caching)
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
 
+    # Step 2: Restore cache for Docker layers
+    - name: Cache Docker layers
+      uses: actions/cache@v4
+      with:
+        path: /tmp/.buildx-cache
+        key: buildx-cache-${{ github.sha }}
+        restore-keys: |
+          buildx-cache-${{ github.sha }}
+          buildx-cache-
+          buildx
+
+    # Step 3: Check out the repository
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # # Step 4: Log in to registry
     - name: Log into registry
       run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-     
-    # - name: Push xake2019:latest
-    #   run: docker push ghcr.io/ximeraproject/xake2019:latest
-    # - name: Push xake2023:latest
-    #   run: docker push ghcr.io/ximeraproject/xake2023:latest
-    - name: Push xake2024:build
-      run: docker push ghcr.io/ximeraproject/xake2024:build
-      # re-tag manually if and when needed for now ...
-     
+
+    - name: Initialize cache directory
+      run: mkdir -p /tmp/.buildx-cache
+
+    - name: Debug cache
+      run: ls -l /tmp/.buildx-cache
+
+    # Step 5: Build and push the Docker image with caching
+    - name: Build and Push full Docker image
+      run: |
+        docker buildx build \
+          --cache-from=type=local,src=/tmp/.buildx-cache \
+          --cache-to=type=local,dest=/tmp/.buildx-cache,mode=max \
+          --tag ghcr.io/ximeraProject/xake2024:${{ github.ref_name }}-full \
+          --file xake/Dockerfile.2024 \
+          --push .
+
+    # Step 5medium: Build and push the Docker image with caching
+    - name: Build and Push medium Docker image
+      run: |
+        docker buildx build \
+          --cache-from=type=local,src=/tmp/.buildx-cache \
+          --cache-to=type=local,dest=/tmp/.buildx-cache,mode=max \
+          --tag ghcr.io/ximeraProject/xake2024:${{ github.ref_name }}-medium \
+          --file xake/Dockerfile.2024medium \
+          --push .
+
+    - name: Debug cache
+      run: ls -l /tmp/.buildx-cache
+
+    # - name: Save cache
+    #   uses: actions/cache@v4
+    #   with:
+    #     path: /tmp/.buildx-cache
+    #     key: buildx-cache-${{ github.sha }}-saved
+          
