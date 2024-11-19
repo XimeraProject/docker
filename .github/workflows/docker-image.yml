@@ -40,13 +40,22 @@ jobs:
       run: ls -l /tmp/.buildx-cache
 
     # Step 5: Build and push the Docker image with caching
+    - name: Build and Push small Docker image
+      run: |
+        docker buildx build \
+          --cache-from=type=local,src=/tmp/.buildx-cache \
+          --cache-to=type=local,dest=/tmp/.buildx-cache,mode=max \
+          --tag ghcr.io/ximeraproject/xake2024:${{ github.ref_name }} \
+          --file xake/Dockerfile.2024 \
+          --push .
+
     - name: Build and Push full Docker image
       run: |
         docker buildx build \
           --cache-from=type=local,src=/tmp/.buildx-cache \
           --cache-to=type=local,dest=/tmp/.buildx-cache,mode=max \
           --tag ghcr.io/ximeraproject/xake2024:${{ github.ref_name }}-full \
-          --file xake/Dockerfile.2024 \
+          --file xake/Dockerfile.2024full \
           --push .
 
     # Step 5medium: Build and push the Docker image with caching

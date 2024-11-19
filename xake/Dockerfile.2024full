@@ -1,0 +1,27 @@
+FROM registry.gitlab.com/islandoftex/images/texlive:TL2024-2024-11-17-full
+
+RUN apt-get update -y  
+
+RUN apt-get install -y \
+    curl \
+    git  git-restore-mtime \
+    mupdf-tools pdf2svg imagemagick \
+    gnupg \
+    vim wget strace less 
+
+# Install xake (from repo)
+ADD scripts/xake.bin /usr/local/bin/xake
+
+# Add ximeraLatex repo
+RUN mkdir -p /root/texmf/tex/latex
+WORKDIR /root/texmf/tex/latex
+
+RUN git clone https://github.com/XimeraProject/ximeraLatex.git 
+WORKDIR /root/texmf/tex/latex/ximeraLatex
+RUN git pull && git checkout development
+
+ADD scripts/xmlatex /usr/local/bin/xmlatex
+
+RUN git config --global --add safe.directory /code
+
+WORKDIR /code
