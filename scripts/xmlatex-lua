@@ -1,0 +1,715 @@
+#!/bin/bash
+#
+# This script is a wrapper around (and in its full version an extension of) ximera's xake command
+#  THAT ENSURES IT'S RUNNING IN A DOCKER CONTAINER 
+#
+# Usage: 
+#   xmlatex bake
+#   xmlatex compile test/myximerafile.tex
+#   xmlatex serve     # this will also run 'xake frost'
+#   xmlatex -i bash   # gets a bash-shell INSIDE the container
+#
+# Advanced usage
+#   XAKE_IMAGE=ghcr.io/ximeraproject/xake2023:latest xmlatex compile demo.tex    # use a different docker image
+#   COMMAND=pdflatex xmlatex demo.tex                                            # do not run the xake-wrapper, but $COMMAND
+#
+# This script
+#  - loads some configuration from ./xmScripts/config.tex (can be overwritten with CONFIG_FILE)
+#  - for serving, also (basefolder)/$XM_KEYFILE (default .xmKeyFile) will be read (for GPG key settings)
+#  - starts a xake docker container (unless we're already IN a container)
+#  - starts (presumably) a container-specific version of this very script
+#  - that (presumably) starts xake with the arguments passed to this script
+#  - optionally gets you a shell inside the container
+#  - optionally automates lots of other things
+#
+# Note: set environment variable 'export DEBUG=1' and/or use -d option for debugging/tracing
+# Note: this scrips RESTARTS itself (or a variant of itself!!!) IN A DOCKER CONTAINER
+#
+#
+
+: "${CONFIG_FILE:=./xmScripts/config.txt}"
+
+if [[ -f "$CONFIG_FILE" ]]
+then
+        [[ -n "$DEBUG" ]] && echo "Loading settings from config file $CONFIG_FILE."
+        . $CONFIG_FILE
+fi
+
+
+# Set some defaults
+#
+# default docker image to run; overwrite with 'export XAKE_IMAGE=myxake:0.1'
+: "${XAKE_BASE:=xake2024}"
+: "${XAKE_VERSION:=v2.4.2}"
+# : "${XAKE_BASE:=xake2019}"
+# : "${XAKE_VERSION:=v2.1.1}"
+: "${XAKE_CONTAINER:=$XAKE_BASE:$XAKE_VERSION}"
+: "${DOCKER_REPO:=ghcr.io/ximeraproject/}"
+
+# For historic compatibility, keep supporting XAKE_IMAGE
+: "${XAKE_IMAGE:=$DOCKER_REPO$XAKE_CONTAINER}"   # TO BE OBSOLETED
+: "${DOCKER_IMAGE:=$XAKE_IMAGE}"
+
+: "${SERVER_PORT:=2000}"
+: "${SERVER_NAME:=ximeraserver}"
+: "${SERVER_IMAGE:=registry.gitlab.kuleuven.be/wet/ximera/ximeradocker:2.3_b}"
+
+# How to sync DevEnvFiles (.vscode/.devcontainer/xmScripts)
+: "${DEVENV_TGZFILE:=xmDevEnvFiles.tgz}"
+: "${DEVENV_VERSION:=releases/latest/download}"
+# : "${DEVENV_VERSION:=releases/download/v2.4.2}"   # Note the inversed order !!!!
+: "${DEVENV_REPO:=ximeraProject/ximeraNewProject}"
+: "${DEVENV_URL:=https://github.com/$DEVENV_REPO/$DEVENV_VERSION/xmDevEnvFiles.tgz}"
+
+
+#
+# Which folder to mount INSIDE the container, under /code  (use with care: it should contain a build.sh !)
+: "${MOUNTDIR:=$(pwd)}"
+: "${XM_KEYFILE:=.xmKeyFile}"
+#
+# Which script to start inside the container; 
+: "${COMMAND:=xmlatex}"
+# : "${COMMAND:=pdflatex}"     # skip xmlatex inside the container, and directly run a specific command ...    
+
+
+if [[ -f /.dockerenv ]]  
+then
+    echo "Running in docker container (with local hostname $HOSTNAME)"
+elif [[ -n "$KUBERNETES_SERVICE_HOST" ]] 
+then
+    echo "Running in kubernetes container ($KUBERNETES_SERVICE_HOST)"
+else 
+    [[ -n "$DEBUG" ]] && echo "Running $0 on host ($HOSTNAME)"
+
+    if [[ "$1" == "-i" ]]
+    then
+        INTERACTIVE="-it"  # start an interactive docker session (i.e. with a terminal attached)
+        shift 
+    fi 
+
+    # LOCAL_IP is only needed if you want to serve to a ximeraServer on your localhost; do NOT use XIMERA_URL when using LOCAL_IP
+    if [[ "$LOCAL_IP" == "" ]]
+    then
+        LOCAL_IP=$(set -- $(hostname -I); echo "$1")
+        [[ -n "$DEBUG" ]] && echo "Setting LOCAL_IP=$LOCAL_IP"
+    fi
+
+    if [[ "$1" == "ximeraserver" ]]
+    then    
+        echo "Starting ximera $SERVER_NAME from $SERVER_IMAGE on port $SERVER_PORT"
+        docker run --rm --name $SERVER_NAME -p 2000:$SERVER_PORT $SERVER_IMAGE
+        exit
+    fi
+
+    echo "Restarting myself in docker (from image $DOCKER_IMAGE)"	
+    [[ -n "$DEBUG" ]] && echo  \
+    docker run --env LOCAL_IP --env XIMERA_URL --env XIMERA_NAME --env GPG_KEY --env GPG_KEY_ID --env DEBUG --network host --rm $INTERACTIVE --mount type=bind,source=$MOUNTDIR,target=/code $DOCKER_IMAGE $COMMAND $*
+    docker run --env LOCAL_IP --env XIMERA_URL --env XIMERA_NAME --env GPG_KEY --env GPG_KEY_ID --env DEBUG --network host --rm $INTERACTIVE --mount type=bind,source=$MOUNTDIR,target=/code $DOCKER_IMAGE $COMMAND $*
+    exit 
+fi
+
+# We're for sure running in a container now
+# We'll start using more advanced bash/linuix functionality, because we're (presumable...) in the known context of a properly configured container image.
+
+echo "Starting $0 $*"
+
+# utility functions for errorhandling/debugging (and logging to be added ...?)
+error() {
+        echo "ERROR: $*" >&2
+        exit 1
+}
+
+debug() {
+        [[ -n "$DEBUG" ]] && echo "DEBUG: $*"
+}
+
+# Set reasonable defaults for variables
+: "${LOCAL_IP:=localhost}"
+
+# XIMERA_URL determines the ximeraServer this repo will be published to by 'serve'
+# By default: localhost:2000, can be overwritten by ENV variable or in config.txt
+: "${XIMERA_URL:=http://localhost:2000/}"     # default: publish to ximera-docker-instance, but 'localhost' does refer to THIS container
+
+# XIMERA_NAME determines the 'name' this repo is published to on the ximeraServer, ie the first part after the hostname
+#  By default the (official) git reponame, converted to lowercase and with dashed-replaced-by-underscores
+# Can be overwritten by ENV variable or in config.txt
+: "${XIMERA_NAME:=$(basename -s .git $(git config --get remote.origin.url) | tr '[:upper:]' '[:lower:]' | tr '-' '_')}"
+
+# : "${XIMERA_REPO:=test}"    # Obsolete (only used in gitlab pipelines)
+: "${NB_JOBS:=2}"             # Degree of parallelism of xake bake
+: "${XAKE:=xake}"             # name of the xake executable 
+: "${LUAXAKE:=/root/texmf/tex/latex/luaxake/luaxake}"
+# : "${LUAXAKE:=texlua /root/texmf/tex/latex/luaxake/luaxake  -s config.lua}"
+
+while getopts ":hitvds" opt; do
+  case ${opt} in
+    h ) 
+       cat <<EOF
+        Build and publish a ximera-repository to a ximera-server (via bake/frost/serve)
+
+        Publishes to $XIMERA_URL$XIMERA_NAME 
+
+	This script is a (docker-)wrapper to 'xake', and contains some extra convenience-functions for building pdf's.
+	
+	Usage:
+        xmlatex compile path/to/file.tex
+        xmlatex compilePdf path/to/file.tex
+        xmlatex bake
+        xmlatex serve     (does ALSO do frost and setup gpg-keys ...!)
+        xmlatex -i bash   (start a shell inside the container)
+	   
+EOF
+       exit 0
+      ;;
+    i )
+        echo "Interactive session"
+        ;;
+    d ) DEBUG=1
+        VERBOSE="-v"
+        XAKE="$XAKE -v"
+        LUAXAKE="$LUAXAKE -l debug "
+      ;;
+    v ) VERBOSE="-v" 
+        XAKE="$XAKE -v"
+        LUAXAKE="$LUAXAKE -l info "
+      ;;
+    s ) XAKE="$XAKE --skip-mathjax"
+      ;;      
+    \? ) echo "Usage: build [-h] [-i] <commands>"
+	 exit 1
+      ;;
+  esac
+done
+shift $((OPTIND -1))
+COMMAND=$1
+
+
+# If there are local versions of ximeraLatex, copy them to the right place  inside the container
+if [[ -f .ximera/ximera.4ht ]]; then
+    echo "USING ximera.4ht from local repo"
+    cp .ximera/ximera.4ht /root/texmf/tex/latex/ximeraLatex/
+fi
+
+if [[ -f .ximera/ximera.cls ]]; then
+    echo "USING ximera.cls from local repo"
+    cp .ximera/ximera.cls /root/texmf/tex/latex/ximeraLatex/
+fi
+
+if [[ -f .ximera/ximera.cfg ]]; then
+    echo "USING ximera.cfg from local repo"
+    cp .ximera/ximera.cfg /root/texmf/tex/latex/ximeraLatex/
+fi
+
+if [[ -f .ximera/xourse.cls ]]; then
+    echo "USING xourse.cls from local repo"
+    cp .ximera/xourse.cls /root/texmf/tex/latex/ximeraLatex/
+fi
+if [[ -f .ximera/xourse.4ht ]]; then
+    echo "USING xourse.4ht from local repo"
+    cp .ximera/xourse.4ht /root/texmf/tex/latex/ximeraLatex/
+fi
+
+# HACK: is there a better solution for sagelatex ...?
+if [[ -f .ximera/sagetex.sty ]]; then
+    echo "USING sagetex.sty from local repo"
+    cp .ximera/sagetex.sty /root/texmf/tex/latex/ximeraLatex/
+fi
+
+[[ -d "/root/texmf/tex/generic" ]] || mkdir /root/texmf/tex/generic
+
+# HACK (202410) : this is/has been is some ximeraLatex versions, un til stable in CTAn/teXLive
+if [[ -f /root/texmf/tex/latex/ximeraLatex/pgfsys-dvisvgm4ht.def ]]; then
+    echo "USING pgfsys-dvisvgm4ht.def from ximeraLatex in docker image"
+    cp /root/texmf/tex/latex/ximeraLatex/pgfsys-dvisvgm4ht.def /root/texmf/tex/generic/
+fi
+
+if [[ -f .ximera/pgfsys-dvisvgm4ht.def ]]; then
+    echo "USING pgfsys-dvisvgm4ht.def from local repo (OVERWRITE... !)"
+    cp .ximera/pgfsys-dvisvgm4ht.def /root/texmf/tex/generic/
+fi
+
+# Use a local xmlatex.full if available
+# Needed for call-xmlatex-from-xake, which DOES NOT use COMMAND/XMLATEX variable...
+# Deprecated .... (should become obsolete with new xake's ...)
+if [[ -f ./xmScripts/xmlatex.full ]]; then
+    echo "USING xmlatex.full from local repo"
+    [[ -n "$DEBUG" ]] && diff ./xmScripts/xmlatex.full /usr/local/bin/xmlatex
+    cp /usr/local/bin/xmlatex /usr/local/bin/xmlatex.$(date "+%F-%H-%M-%S")
+    cp ./xmScripts/xmlatex.full /usr/local/bin/xmlatex
+fi
+
+# Add anything that might not be installed in the container 
+if [[ -d .texmf ]]; then
+    echo "USING .texmf etc from local repo"
+    [[ -d "/root/texmf/tex/generic" ]] || mkdir /root/texmf/tex/generic
+    cp -r .texmf/* /root/texmf/tex/generic/
+fi
+
+# If there is a .ximera_local folder, OVERWRITE the complete ximeraLatex install inside this container
+#  ( This could/should replace the above one-by-one copies from .ximera ...)
+if [[ -d .ximera_local ]]; then
+    echo "USING .ximera_local from local repo"
+    mv /root/texmf/tex/latex/ximeraLatex /root/ximeraLatex.ORI
+    mkdir /root/texmf/tex/latex/ximeraLatex
+    cp -r .ximera_local/* /root/texmf/tex/latex/ximeraLatex
+fi
+
+# [[ -n "$DEBUG" ]]  && ls -al /root/texmf/tex/latex/ximeraLatex/
+
+# Extend the path, so that commands in the rootfolder OVERWRITE what is in the container
+PATH=$(pwd):$PATH
+
+# Longer lines in pdflatex output
+export max_print_line=1000
+export error_line=254
+export half_error_line=238
+
+
+# After git clone, ALL files seem recent; try to reset them (to prevent baking all files all the time)
+#  (needed in gitlab CI/CD ...)
+reset_file_times() {
+ if find . -maxdepth 1 -name "*.tex" -mtime +1 | grep . >/dev/null
+ then
+  # .tex files older then 1 day: presumably the git was not checked out just now,
+  # and modittimes are correct
+  echo "Skipping resetting file times"
+ else
+  # all .tex files are recent, presumable just after a git clone. This would cause re-compile of everything
+  # therefore: restore all modif-dates
+  echo "Resetting file times"
+  # HACK: git-restore-time is not in (old) images: install it on-the-fly
+  git restore-mtime -f  || apt install git-restore-mtime && git restore-mtime -f && echo OK
+  # git status   # in DETACHED HEAD in CI !!
+  debug "Current .tex, .sty and .pdf files):"
+  [[ -n "$DEBUG" ]] && ls -al *.tex *.sty *.pdf 2>/dev/null
+ fi
+}
+
+if [[ "$COMMAND" == "bash" ]]
+then
+    # interactive shell (option -i needed when starting the container !)
+    shift  #  remove "bash"
+    ${XAKE%xake} /bin/bash $*
+
+elif [[ "$COMMAND" == "bake" ]]
+then
+    # files with beamer are IGNORED by bake and bakePdf   (should only be compiled to pdf, not html)
+    #  do it 'by hand' here
+    shift   # remove 'bake'
+    reset_file_times
+    mkdir -p ximera-downloads
+    echo "Copying gif files ..."
+    [[ -f pictures/*.gif ]] && cp pictures/*.gif ximera-downloads
+    echo "Compiling beamer and _pdf.tex files ..."
+        find \( -name "*beamer*.tex" -o -name "*_pdf.tex" \) -printf '%P\n' | while read file; do
+	ls -al ${file%tex}{tex,pdf,svg,log}
+        if [[ "$file" -nt "${file/%.tex/.pdf}" ]]
+        then
+             echo "Compiling $file   (beamer)"
+             $XAKE compilePdf $file
+             echo "Copying $file to ximera-downloads"
+             cp ${file/%.tex/.pdf} ximera-downloads
+             echo "Converting $file to svg"
+             pdf2svg ${file/%.tex/.pdf} ${file/%.tex/.svg}
+        else
+             echo "File $file uptodate"
+        fi
+    done
+    echo "Baking other files ..."
+    # $XAKE --jobs $NB_JOBS bake      # Generate html files
+    $LUAXAKE bake $*     # Generate html files
+elif [[ "$COMMAND" == "cleanstandaard" ]]
+then
+    NAME=standaard
+    rm -rf ximera-downloads/"$NAME"_pdf
+    find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} sh -c 'echo "Removing $1"; rm "$1"' -- {} "$NAME" # remove .pdf's
+elif [[ "$COMMAND" == "cleanhandout" ]]
+then
+    NAME=handout
+    rm -rf ximera-downloads/"$NAME"_pdf
+    find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} sh -c 'echo "Removing $1"; rm "$1"' -- {} "$NAME" # remove .pdf's
+elif [[ "$COMMAND" == "bakestandaard" ]]
+then
+    NAME=standaard
+    reset_file_times
+    $XAKE --jobs $NB_JOBS bakePdf "$NAME" 
+    find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} dirname ximera-downloads/"$NAME"_pdf/{} | xargs mkdir -p # create necessairy folders
+    find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} sh -c 'echo "Move $1 to ximera-downloads"; cp "$1" ximera-downloads/"$2"_pdf/"${1%-*}.pdf" || (echo "Failed moving" && exit 1)' -- {} "$NAME" # Copy to ximera-downloads
+elif [[ "$COMMAND" == "bakehandout" ]]
+then
+    NAME=handout
+    # files with _pdf are IGNORED by bake and bakePdf   (should only be complied to pdf, not html)
+    #  do it 'by hand' here Needed to create the handouts including formularia
+    reset_file_times
+    mkdir -p ximera-downloads
+    echo "Compiling _pdf.tex files ..."
+        find \( -name "*_pdf.tex" \) -printf '%P\n' | while read file; do
+	ls -al ${file%tex}{tex,pdf,log}
+        if [[ "$file" -nt "${file/%.tex/.pdf}" ]]
+        then
+             echo "Compiling $file   (beamer)"
+             $XAKE compilePdf $file
+             cp ${file/%.tex/.pdf} ximera-downloads
+             cp ${file/%.tex/.pdf} ${file/%_pdf.tex/-handout_pdf.pdf}
+        else
+             echo "File $file   uptodate (beamer)"
+        fi
+    done
+    timeout 50m $XAKE --jobs $NB_JOBS bakePdf "$NAME" "\\PassOptionsToClass{handout}{ximera}\\PassOptionsToClass{handout}{xourse}"
+    echo "Moving pdfs to ximera-downloads"
+    find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} dirname ximera-downloads/"$NAME"_pdf/{} | xargs mkdir -p # create necessairy folders
+   #find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} sh -c 'echo "Move $1 to ximera-downloads"; cp "$1" ximera-downloads/"$2"_pdf/"${1%-*}.pdf" || (echo "Failed moving" && exit 1)' -- {} "$NAME" # Copy to ximera-downloads
+    find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} sh -c 'cp "$1" ximera-downloads/"$2"_pdf/"${1%-*}.pdf" || (echo "Failed moving" && exit 1)' -- {} "$NAME" # Copy to ximera-downloads
+
+elif [[ "$COMMAND" == "bakebeamer" ]]
+then
+    # files with beamer are IGNORED by bake ansd bakePdf   (should only be complied to pdf, not html)
+    #  do it 'by hand' here
+    NAME=handout
+    reset_file_times
+    echo "Compiling beamer files ..."
+    find -name "*beamer*.tex" -printf '%P\n' |grep -v preamble | grep -v handout | while read file; do
+	ls -al ${file%tex}{tex,pdf,log}
+        if [[ "$file" -nt "${file/%.tex/.pdf}" ]]
+        then
+            echo "Compiling $file   (beamer)"
+            $XAKE compilePdf $file
+            $XAKE compilePdf $file  $NAME "\\PassOptionsToClass{handout}{beamer}"
+        else
+            echo "File $file   uptodate (beamer)"
+        fi
+        mkdir -p public
+        basename=$(basename $file)
+        cp ${file/%.tex/.pdf} public/${basename/%.tex/.pdf}
+        cp ${file/%.tex/-handout.pdf} public/${basename/%.tex/-handout.pdf}
+        mkdir -p $(dirname ximera-downloads/"$NAME"_pdf/$file})
+        cp ${file/%.tex/.pdf} ximera-downloads/${NAME}_pdf/${file/%.tex/.pdf}
+        cp ${file/%.tex/-handout.pdf} ximera-downloads/${NAME}_pdf/${file/%.tex/-handout.pdf}
+    done
+    echo "Compiling _pdf files ..."
+    find -name "*_pdf.tex" -printf '%P\n' | while read file; do
+	ls -al ${file%tex}{tex,pdf,log}
+        #if [[ "$file" -nt "${file/%.tex/.pdf}" ]]
+        #then
+            echo "Compiling $file   (_pdf)"
+            $XAKE compilePdf $file
+        #else
+        #    echo "File $file   uptodate (_pdf)"
+        #fi
+        mkdir -p public
+        basename=$(basename $file)
+        cp ${file/%.tex/.pdf} public/${basename/%.tex/.pdf}
+        mkdir -p $(dirname ximera-downloads/"$NAME"_pdf/$file})
+        cp ${file/%.tex/.pdf} ximera-downloads/${NAME}_pdf/${file/%.tex/.pdf}
+    done
+elif [[ "$COMMAND" == "serve" || "$COMMAND" == "all" || "$COMMAND" == "frost" ]]
+then
+    echo "Doing xake $COMMAND"
+
+    # 'all' does also bake (should not harm to do it *always*, except for VERY SPECIFIC cases,
+    #  e.g. adhoc manipulation of .html files ...)
+    if [[ "$COMMAND" = "all" ]] 
+    then
+        echo "Baking ..."
+        $LUAXAKE  bake .  || error "Could not bake"
+        # texlua  /root/texmf/tex/latex/luaxake/luaxake  -l debug -s config.lua  bake .  || error "Could not bake"
+        # $XAKE --jobs $NB_JOBS bake      # Generate html files
+    fi
+
+    if [[ "$COMMAND" = "all" || "$COMMAND" = "frost" ]] 
+    then
+        echo "Frosting ..."
+
+        [[ -n "$XM_FROST_WITH_UNCOMMITTED_CHANGES" ]] && FROST="Frost"
+
+        # set git name and email if not yet set (e.g. in vanilla docker container)
+        git config  --get user.name  || git config user.name "xmlatex Xake"
+        git config  --get user.email || git config user.email "xmlatex@xakecontainer"
+
+
+        $LUAXAKE  frost .  || error "Could not frost"  
+        # texlua  /root/texmf/tex/latex/luaxake/luaxake  -l debug -s config.lua  frost .  || error "Could not frost"  
+        #  $XAKE $FROST || error "xake $FROST failed, you might want to set XM_FROST_WITH_UNCOMMITTED_CHANGED (e.g. in config.txt)"  
+
+        if [[ -n "$DEBUG" ]]
+        then
+            echo "git status:"
+            git status
+            echo "git tag -n:"
+            git tag -n
+            echo "git rev-parse --abbrev-ref --all:"
+            git rev-parse --abbrev-ref --all
+            echo "git remote -v:"
+            git remote -v
+        fi
+    fi
+
+    echo "Preparing serve (gpg stuff) ..."
+
+    # If GPG_KEY_ID (and presumably GPG_KEY) are given, 
+    # ignore XM_KEYFILE, which probably should only be used for the DUMMY key ...
+    if [[ -z "$GPG_KEY_ID" ]]
+    then
+        if [[ -f "$XM_KEYFILE" ]]
+        then
+            echo "Using settings from $XM_KEYFILE"
+            source $XM_KEYFILE
+	        echo GPG_KEY_ID=$GPG_KEY_ID
+	        echo GPG_KEY=${GPG_KEY:0:10}...
+            # : ${XIMERA_NAME:=$REPO_XIMERA}
+            # : ${XIMERA_URL:=$URL_XIMERA}
+        fi
+        if [[ -z "$GPG_KEY_ID" ]]   # still no key ...
+        then
+            error "No GPG_KEY_ID set; serving is not possible."
+        fi
+    fi
+    debug "Loading GPG Key"
+    if [[ -f "$GPG_KEY" ]]
+    then
+        echo "Importing private key from GPG_KEY=$GPG_KEY"
+        # First try import as 'binary' file, if this fails, try base64 decoded version...
+        if ! gpg -q $VERBOSE --import $GPG_KEY 
+        then
+            debug "Importing base64-encode private key from $GPG_KEY"
+            cat $GPG_KEY | base64 --decode > .gpg # decode the base64 gpg key
+            gpg -q $VERBOSE --import .gpg ||  error "gpg --import failed (from encoded key in file)"
+            rm .gpg # remove the gpg key so it is certainly not cached
+        fi
+    else 
+        echo  "Importing (encoded) private key from variable GPG_KEY"
+        echo "$GPG_KEY" | base64 --decode > .gpg # decode the base64 gpg key
+        debug "Decoded in .gpg: $(ls -al .gpg)"
+        debug "Starting gpg -q $VERBOSE --import .gpg"
+        gpg -q $VERBOSE --import .gpg  || echo "gpg --import failed (from key itself in variable)"
+        rm .gpg # remove the gpg key so it is certainly not cached
+    fi
+    [[ -n "$DEBUG" ]] && gpg --list-keys
+
+
+    if [[ "$XIMERA_URL" =~ http://localhost ]]
+    then
+        # On localhost, don't care too much about consistency/security 
+        debug "Serving to  http://localhost..."
+        export XM_PUSH_FORCE=1
+        export XM_FROST_WITH_UNCOMMITTED_CHANGES=1
+        export XM_PUBLISH_WITH_DUMMY_KEY=1
+    fi
+
+
+
+    if [[ "$GPG_KEY_ID" =~  ^215FC33FAB44D ]]
+    then
+        if [[ -n "$XM_PUBLISH_WITH_DUMMY_KEY" ]]
+        then
+            echo "Publishing to $XIMERA_URL with dummy key."
+        else   
+            error "I won't publish to $XIMERA_URL with a dummy GPG key." 
+        fi 
+    else
+	    debug "We're not using the dummy key, but ${GPG_KEY_ID:0:10}"
+    fi
+
+    debug "KEYSERVER gpg $VERBOSE --keyserver $XIMERA_URL --send-key $GPG_KEY_ID"
+    gpg -q $VERBOSE --keyserver $XIMERA_URL --send-key "$GPG_KEY_ID" || echo "WARNING: gpg sendkey failed (to url $XIMERA_URL), which is no problem if this key is already there"
+    
+    # echo "Doing xake NAME (on $XIMERA_URL set name to $XIMERA_NAME)"
+    # debug "xake NAME: $XAKE -U $XIMERA_URL -k $GPG_KEY_ID name $XIMERA_NAME"
+    # $XAKE -U $XIMERA_URL -k "$GPG_KEY_ID" name "$XIMERA_NAME" || error "xake name failed" 
+
+
+# ENCTOKEN="$(curl  ${XIMERA_URL}gpg/token/$GPG_KEY_ID)"
+echo "Contacting ${XIMERA_URL}gpg/token/$GPG_KEY_ID"
+TOKEN=$(curl  ${XIMERA_URL}gpg/token/$GPG_KEY_ID | gpg --decrypt)
+
+
+debug "Got $TOKEN"
+[[ -z "$TOKEN" ]] && error "Could not get initial token from $XIMERA_URL for $GPG_KEY_ID"
+
+# DECRYPTED_TOKEN=$(echo $TOKEN | gpg --decrypt)
+# echo "Got $DECRYPTED_TOKEN"
+
+type hashcash >/dev/null || error "Executable 'hashcash' not available"
+type jq       >/dev/null || error "Executable 'jq' not available"
+
+HASHCASH=$(hashcash -b 20 -qm $XIMERA_NAME.git)
+LKEYS=$(curl -s --data brol -H "X-Hashcash: $HASHCASH" -H "Authorization: Bearer $TOKEN" ${XIMERA_URL}$XIMERA_NAME.git)
+# openssl rand -hex 48 | gpg -e -a --always-trust --recipient 215FC33FAB44D5CCA31A04B2CC78CB561FDC49A8  | gpg --decrypt
+
+KEYS=$(echo $LKEYS | jq)
+
+# eval $(echo $KEYS | jq -r 'to_entries | .[] | "export " + .key + "=" + @sh .value')
+
+
+if [[ -z "$KEYS" ]]
+then 
+   error "No keys received from $XIMERA_URL (got $LKEYS)"
+fi
+
+export $(echo $KEYS | jq -r 'to_entries | map("\(.key | ascii_upcase)=\(.value)") | .[]')
+
+debug "keyid=$KEYID"
+debug "token=$TOKEN"
+
+if ! git remote get-url ximera
+then
+    echo "Adding ximera ${XIMERA_URL}$XIMERA_NAME.git as git remote"
+    git remote add ximera ${XIMERA_URL}$XIMERA_NAME.git
+else
+    echo "Updating ximera ${XIMERA_URL}$XIMERA_NAME.git as git remote"
+    git remote set-url ximera ${XIMERA_URL}$XIMERA_NAME.git
+fi
+
+[[ -n "$DEBUG" ]] && {
+    echo "CURRENT GIT CONFIG"
+    git config --local --get-all remote.ximera.url
+    git config --local --get-all http.$XIMERA_URL.extraHeader
+}
+
+# git config --local --unset remote.ximera.extraHeader 
+# git config --local --add remote.ximera.extraHeader "Authorization: Bearer $TOKEN"
+debug "Setting/updating extraHeader for $XIMERA_URL"
+git config --local --unset http.$XIMERA_URL.extraHeader
+git config --local --add http.$XIMERA_URL.extraHeader "Authorization: Bearer $TOKEN"
+
+[[ -n "$DEBUG" ]] && {
+    echo "NEW GIT CONFIG"
+    git config --local --get-all remote.ximera.url
+    git config --local --get-all http.$XIMERA_URL.extraHeader
+}
+
+# set git name and email if not yet set (e.g. in vanilla docker container)
+git config  --get user.name  || { echo Setting git user.name; git config user.name "xmlatex Xake"; }
+git config  --get user.email || git config user.email "xmlatex@xakecontainer"
+
+HEAD_OID=$(git rev-parse HEAD)
+
+TAG="publications/$HEAD_OID"
+
+echo "TAG=$TAG"
+
+
+if ! git show-ref $TAG
+then
+    error "No tag: need frost"
+    # git add ximera-downloads
+    # git tag -m 'xake committed' $TAG $HEAD_OID
+fi
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+debug "BRANCH=$BRANCH"
+
+echo "Pushing new publication to ximera server"
+
+# debug "git push ximera $BRANCH:master"
+# git push ximera $BRANCH:master
+
+    # HACK to OVERWRITE an already published revision
+    # This option obviously should either be added to 'xake serve', or the whole git pushing should be taken out of 'xake serve' and moved here
+    if [[ -n "$XM_PUSH_FORCE" ]]
+    then
+    #    REV=$(git rev-parse HEAD)
+       echo "git push -f ximera $TAG (FORCING PUSH)"
+             git push -f ximera $TAG
+             git push -f ximera $BRANCH:master
+    else
+        debug "git push ximera $TAG"
+               git push ximera $TAG
+               git push ximera $BRANCH:master
+    fi
+
+#    echo "Prepare git repo"
+#    git fetch --unshallow # Zorg ervoor dat we de hele geschiedenis hebben ipv enkel een deel, anders werkt het serven niet
+#   .git config core.fileMode false
+#    git branch -D master || true    #ignore error
+#    git checkout -B master # doe alsof we op master zitten
+
+    # echo "Doing xake serve"
+    # $XAKE serve  2>&1    # Upload files = push tag
+
+
+
+    # Check if the file exists
+    if [ ! -d ".git" ]; then
+        error "Folder '.git' not found."
+    fi
+
+## Use following line to skip the reset-git-fileowner-hack (e.g. in config.txt)
+# export  XM_NO_RESET_GIT_FILEOWNER=1
+    if [[ -z "$XM_NO_RESET_GIT_FILEOWNER" ]]
+    then
+    # HACK: try to restore ownership of git files (might be set to root after git push in container ...)
+    # Get the owner and group of .git
+    owner_group=$(stat -c "%u:%g" ".git")
+
+    if [[ "$owner_group" != "0:0" ]]
+    then
+        # Change the ownership of all files in the current directory
+        echo "Changing ownership of all files in .git to $owner_group."
+        chown -R "$owner_group" .git
+    fi
+
+    fi  # end reset-git-fileowner
+
+    debug "End of xake serve"
+
+elif [[ "$COMMAND" == "updateDevEnv" ]]
+then
+    echo "Doing xake $COMMAND"
+
+    [[ -f "$DEVENV_TGZFILE" ]] && { debug "Removing old $DEVENV_TGZFILE"; rm -f "$DEVENV_TGZFILE"; }
+
+    debug "Getting new file $DEVENV_TGZFILE from $DEVENV_URL"
+    wget -O "$DEVENV_TGZFILE" "$DEVENV_URL"
+
+    debug "Getting list of files in $DEVENV_TGZFILE"
+    filelist=$(tar -ztf "$DEVENV_TGZFILE" | grep -v "/$")
+
+    if [[ -n $(git status --porcelain $filelist) ]]; 
+    then
+        echo "There are uncommitted changes:"
+        git diff --stat $filelist
+        exit 1
+    else
+        echo "No current changes"
+    fi
+
+
+    debug "Extracting $DEVENV_TGZFILE"
+    tar -xzvf "$DEVENV_TGZFILE"
+
+
+## Use following line to skip the reset-git-fileowner-hack (e.g. in config.txt)
+# export  XM_NO_RESET_GIT_FILEOWNER=1
+    if [[ -z "$XM_NO_RESET_GIT_FILEOWNER" ]]
+    then
+    # HACK: try to restore ownership of git files (might be set to root after git push in container ...)
+    # Get the owner and group of .git
+    owner_group=$(stat -c "%u:%g" ".git")
+
+    if [[ "$owner_group" != "0:0" ]]
+    then
+        # Change the ownership of all files in the current directory
+        debug "Changing ownership of extracted files to $owner_group."
+        chown -R "$owner_group" .vscode .devcontainer .gitignore xmScripts
+    fi
+
+    fi  # end reset-git-fileowner
+
+
+    if [[ -n $(git status --porcelain $filelist) ]]; 
+    then
+        echo "Verify and commit/push following changes"
+        git diff $filelist
+    else
+        echo "No changes. Your repo was already uptodate."
+    fi
+
+else
+    # Hope that 'xake $*' was intended ...; if not, xake will complain.
+    echo "Starting $LUAXAKE $*"
+    $LUAXAKE $*
+fi
+
+#exit 0; % would ignore (some) errors; might be relevant in CI/CD context
