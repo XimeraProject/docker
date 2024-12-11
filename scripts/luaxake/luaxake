@@ -195,8 +195,8 @@ for i,nextarg in ipairs(config.dirs) do
     if #to_be_compiled == 0 then
       log:status("Nothing to be baked for "..nextarg)
     else
-    for _, file in ipairs(to_be_compiled) do
-      log:status("Compiling file " .. file.absolute_path)
+    for i, file in ipairs(to_be_compiled) do
+      log:status(string.format("Compiling file %3d/%d: %s", i, #to_be_compiled, file.absolute_path))
       local statuses = compile.compile(file, config.compilers, config.compile_sequence)
       table.insert(all_statuses,statuses)
       compile.print_errors(statuses)

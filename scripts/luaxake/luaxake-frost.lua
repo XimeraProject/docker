@@ -1,5 +1,6 @@
 local M = {}
 local pl = require "penlight"
+local path = require "pl.path"
 local html_transform = require "luaxake-transform-html"
 local files = require "luaxake-files"
 local log = logging.new("frost")
@@ -111,8 +112,12 @@ local function frost(root)
     -- require 'pl.pretty'.dump(tex_xourses)
 
     needing_publication[#needing_publication + 1] = "metadata.json"
-    needing_publication[#needing_publication + 1] = "ximera-downloads"
 
+    if path.exists("ximera-download") then
+        needing_publication[#needing_publication + 1] = "ximera-downloads"
+    else 
+        log:debug("No ximera-download folder, and thus no PDF files will be available for download")
+    end
     -- require 'pl.pretty'.dump(needing_publication)
 
     -- 'git add' the files in batches of 10   (risks line-too-long!)

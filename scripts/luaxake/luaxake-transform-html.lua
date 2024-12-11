@@ -69,11 +69,15 @@ local html_cache = {}
 ---@return string? error_message
 local function load_html(filename)
   -- cache DOM objects
-  if not html_cache[filename] then 
+  if html_cache[filename] then 
+    log:debug("returning cached dom ")
+    -- require 'pl.pretty'.dump(domobject.html_parse(content))
+    return html_cache[filename]
+  else
     log:debug("Loading html for "..filename)
     local f = io.open(filename, "r")
     if not f then return nil, "Cannot open HTML file: " .. (filename or "") end
-    log:debug("Opened html for "..filename)
+    -- log:debug("Opened html for "..filename)
     local content = f:read("*a")
     f:close()
     -- log:debug("Dumping html for "..filename..": "..content)
@@ -81,9 +85,6 @@ local function load_html(filename)
     log:debug("returning non-cached dom ")
     return domobject.html_parse(content)
   end
-  log:debug("returning dom ")
-  -- require 'pl.pretty'.dump(domobject.html_parse(content))
-  return html_cache[filename]
 end
 
 --- detect if the HTML file is xourse
@@ -135,26 +136,6 @@ local function remove_empty_paragraphs(dom)
   end
 end
 
---- find HTML file linked from activity
----@param file metadata of the linking TeX file
----@param href string relative path from the linking HTML file
----@return string|nil path to the html file
----@return string href attribute or error message
-local function find_activity_html(file, href)
-  -- some activity links don't have links to HTML files
-  -- remove the optional '.tex'
-  if path.extension(href) == ".tex" then href, _ = path.splitext(href) end
-  if path.extension(href) == "" then href = href .. ".html" end
-  local htmlpath = file.absolute_dir .. "/" .. href
-
-  log:debug("find_activity_html for "..file.filename.." and "..href.." about to return "..htmlpath)
-
-  if path.exists(htmlpath) then return htmlpath, href end
-  return nil, "Cannot find activity file: " .. htmlpath
-end
-
-
-
 local function read_title_and_abstract(activity_dom)
   local title, abstract
   local title_el = activity_dom:query_selector("title")[1]
@@ -176,16 +157,26 @@ local function transform_xourse(dom, file)
     local href = activity:get_attribute("href")
     log:debug("activity", href)
     if href then
-      local htmlpath
-      htmlpath, href = find_activity_html(file, href)
-      -- activity:set_attribute("href",href)
-      if htmlpath then
-        log:debug("activity", htmlpath)
+        -- some activity links don't have links to HTML files
+        -- remove the optional '.tex'
+      local newhref = href
+      if path.extension(href) == ".tex" then newhref, _ = path.splitext(href) end
+      -- add .html if no extension (anymore)
+      if path.extension(newhref) == "" then newhref = newhref .. ".html" end
+      
+      if newhref ~= href then 
         -- TODO: href has now added .html suffix. but maybe it was without suffix for some specific reason in the first place
-        -- so I will not set the fixed href, because it could break something
-        log:debug("Resetting href to "..href) 
-        activity:set_attribute("href", href)
-        -- require 'pl.pretty'.dump(htmlpath)
+        log:debug("Resetting href to "..newhref .. "( from "..href..")") 
+        activity:set_attribute("href",newhref)
+      end
+      
+      local htmlpath = file.absolute_dir .. "/" .. newhref
+      
+      if not path.exists(htmlpath) then 
+        log:error("HTML file "..htmlpath.." for activity in "..file.filename.." not (yet?) found; SKIPPING add/update title and abstract")
+      else
+        -- add the title and abstract of the activity to the xourse file ...
+        log:debug("Updating title/abstract for activity ", htmlpath)
 
         local activity_dom, msg = load_html(htmlpath)
         if not activity_dom then
@@ -214,8 +205,6 @@ local function transform_xourse(dom, file)
             parent:add_child_node(h3,1)
           end
         end
-      else
-        log:error(href)
       end
     end
   end
