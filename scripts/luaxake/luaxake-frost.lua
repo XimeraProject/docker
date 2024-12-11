@@ -53,8 +53,7 @@ end
 local function frost(root)
     log:debug("frost")
     
-    -- TODO: we only use the tex_files here ???
-    local to_be_compiled, tex_files = files.needing_compilation(root, config.output_formats, config.compilers)
+    local tex_files = files.get_tex_files_with_status(root, config.output_formats, config.compilers)
     -- TODO: warn/error/compile if there are to_be_compiled files ?
 
     local needing_publication = {}
@@ -167,11 +166,13 @@ local function frost(root)
 
     if output == tagName
     then
-        log.info("Tag "..tagName.." already exists")
+        log:status("Tag "..tagName.." already exists")
         return 0
     else
-        log.info("Creating "..tagName.." for "..commitoid)
         result, output = osExecute("git tag "..tagName.." "..commitoid)
+        if result == 0 then
+            log:status("Created "..tagName.." for "..commitoid)
+        end
         return result
     end
     -- never reach here ...

@@ -30,6 +30,7 @@ Options:
 --- @field config    string   TeX4ht config file
 --- @field help      boolean  Print help message
 --- @field settings  string   Luaxake settings script
+--- @field loglevel  string   Logging level
 --- @field version   boolean  Print version
 --- @field command   string   Command to execute
 --- @field dir       table    Document root directory
@@ -163,20 +164,20 @@ end
 
 config.dirs = dirs
 
+local tex_files = {}
 for i,nextarg in ipairs(config.dirs) do 
 
-  log:info("Processing directory: " .. nextarg)
+  log:info("Processing argument " .. nextarg)
 
-  local to_be_compiled={}
-  local tex_files
-
+  local more_tex_files
   if path.isdir(nextarg) then
     
-    to_be_compiled, tex_files = files.needing_compilation(nextarg, config.output_formats, config.compilers)
+    more_tex_files = files.get_tex_files_with_status(nextarg, config.output_formats, config.compilers)
   elseif  path.isfile(nextarg) and nextarg:match("%.tex$") ~= nil then
     local metadata = files.get_metadata_for_filename(nextarg)
-    log:debug("Found tex file "..metadata.filename)
-    tex_files = { metadata }
+    metadata.needs_compilation = true;
+    log:debug("Explicitly adding tex file "..metadata.filename)
+    more_tex_files = { metadata }
     to_be_compiled = tex_files
   elseif  nextarg:match("%.tex$") == nil then
     log:warning("File "..nextarg.." not a .tex file: SKIPPING")
@@ -184,16 +185,21 @@ for i,nextarg in ipairs(config.dirs) do
     log:warning("File "..nextarg.." not found: SKIPPING")
   end
 
+  table.move(more_tex_files, 1, #more_tex_files, #tex_files+1, tex_files)
+end
+
+  local to_be_compiled = files.sort_dependencies(tex_files)
   if #to_be_compiled > 1 then
-    log:info(#to_be_compiled.." files need compiling in "..nextarg)
+    log:info(#to_be_compiled.." files need compiling")
   end
 
   local all_statuses = {}
 
   -- TODO: fix commands (cfr xmlatex/xmlatex/lua)
   if command == "bake" or command == "compilePdf" or command ==  "compile" then
+    log:status("Start "..command)
     if #to_be_compiled == 0 then
-      log:status("Nothing to be baked for "..nextarg)
+      log:status("Nothing to be baked")
     else
     for i, file in ipairs(to_be_compiled) do
       log:status(string.format("Compiling file %3d/%d: %s", i, #to_be_compiled, file.absolute_path))
@@ -203,29 +209,35 @@ for i,nextarg in ipairs(config.dirs) do
       compile.clean(file, config.clean)
     end
 
-    if #all_statuses > 0 then
-      local errors = {}
-      for _, entry in ipairs(all_statuses) do if (entry.status or 0) > 0 then table.insert(errors, entry) end end
-      if #errors > 0 then
-      log:error("Could not bake "..nextarg..", got "..#errors.." errors")
-      require 'pl.pretty'.dump(errors)
-      os.exit(1)
-      else
-        log:status("Baked "..#to_be_compiled.." files without finding errors")
-      end
+    if #all_statuses == 0 then
+      log:status("Baked "..#to_be_compiled.." files")    -- can n ot occur ??
     else
-      log:status("Baked "..#to_be_compiled.." files")
+      local errors = {}
+      for _, entry in ipairs(all_statuses) do 
+        for _, info in ipairs(entry) do
+          log:debug("File "..(info.output_file or "UNKNOWN??") .." got status " .. (info.status or 'NIL??') )
+          -- require 'pl.pretty'.dump(info)
+        
+          if (info.status or 0) > 0 then 
+            table.insert(errors, info) 
+          end 
+      end
+      end
+      if #errors > 0 then
+        log:error("Could not bake, got "..#errors.." errors")
+        -- require 'pl.pretty'.dump(errors)
+        os.exit(1)
+      else
+        log:info("Baked "..#to_be_compiled.." files without finding errors")
+      end
     end
-  end
 end
-
+end 
 
 if command == "frost" then
   local root="."     -- frost only for root folder
-  log:status("Frosting " .. root)
+  log:status("Start " .. command)
   local ret = frost.frost(root)  
   os.exit(ret)
 end
 
-
-end

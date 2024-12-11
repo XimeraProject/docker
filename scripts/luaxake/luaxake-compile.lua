@@ -51,10 +51,17 @@ end
 --- @param compile_sequence table sequence of keys from the compilers table to be executed
 --- @return [compile_info] statuses information from the commands
 local function compile(file, compilers, compile_sequence)
+  
+  --
+  -- WARNING: (tex-)compilation STARTS IN THE SUBFOLDER !!!
+  --
   local current_dir = lfs.currentdir()
   lfs.chdir(file.absolute_dir)
-  local output_files = file.output_files
+
   local statuses = {}
+  local FAIL = false
+
+  -- Start ALL compilations for this file, in the correct order; stop as soon as one fails...
   for _, extension in ipairs(compile_sequence) do
     local command_metadata = compilers[extension]
     local output_file = file.filename:gsub("tex$", extension)
@@ -83,7 +90,8 @@ local function compile(file, compilers, compile_sequence)
       -- https://stackoverflow.com/a/14031974/2467963
       local status = rc[3]
       if status ~= command_metadata.status then
-        log:error("Command returned wrong status number: " .. (status or ""))
+        log:error("Compilation failed: returns " .. (status or "") ..", but expected ".. command_metadata.status)
+        FAIL = true   -- continue for now, to collect logging etc. ...
       end
       --- @class compile_info
       --- @field output_file string output file name
@@ -118,7 +126,10 @@ local function compile(file, compilers, compile_sequence)
         end
       end
       table.insert(statuses, info)
-    end
+      if FAIL then
+        break   -- STOP FURTHER COMPILATION
+      end
+  end
   end
   lfs.chdir(current_dir)
   return statuses
@@ -130,12 +141,10 @@ local function print_errors(statuses)
   for _, status in ipairs(statuses) do
     local errors = status.errors or {}
     if #errors > 0 then
-      log:error("Compilation errors in the latex run")
-      log:error(status.command)
-      log:error("Filename", "Line", "Message")
+      log:error("Errors from " .. status.command .. ":")
       for _, err in ipairs(errors) do
-        log:error(err.filename or "?", err.line or "?", err.error)
-        log:status(err.context)
+        log:error(string.format("%20s line %d: %s", err.filename or "?", err.line or "?", err.error))
+        log:error(err.context)
       end
     end
   end

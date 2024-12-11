@@ -330,9 +330,8 @@ end
 
 --- find TeX files that needs to be compiled in the directory tree
 --- @param dir string root directory where we should find TeX files
---- @return metadata[] to_be_compiled list of that need compilation
 --- @return metadata[] tex_files list of all TeX files found in the directory tree
-local function needing_compilation(dir, output_formats, compilers)
+local function get_tex_files_with_status(dir, output_formats, compilers)
   local files = get_files(dir)
   local tex_files = filter_main_tex_files(get_tex_files(files))
   -- now check which output files needs a compilation
@@ -358,13 +357,13 @@ local function needing_compilation(dir, output_formats, compilers)
     end
   end
 
-  -- create ordered list of files that needs to be compiled
-  local to_be_compiled = sort_dependencies(tex_files)
-  return to_be_compiled, tex_files
+  -- SKIPPED: create ordered list of files that needs to be compiled
+  return tex_files
 end
 
 
-M.needing_compilation = needing_compilation
+M.get_tex_files_with_status = get_tex_files_with_status
+M.sort_dependencies = sort_dependencies
 M.get_metadata_for_filename = get_metadata_for_filename
 M.get_metadata = get_metadata
 
