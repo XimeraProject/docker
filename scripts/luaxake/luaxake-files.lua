@@ -41,7 +41,7 @@ local function find_config(filename, directories)
   -- the situation with the TeX4ht config file is a bit complicated
   -- it can be placed in the current directory, in the document root directory, 
   -- or in the kpse path. if it cannot be found in any of these places, 
-  -- we will set it to xhtml, which is internall config of TeX4ht
+  -- we will set it to config.config_file (presumably ximera.cfg)
   -- in any case, we must provide a full path to the config file, because it will 
   -- be used in different directories. 
   for _, dir in ipairs(directories) do
@@ -55,8 +55,9 @@ local function find_config(filename, directories)
   if path then return path end
   -- lastly, test if it is a full path to the file
   if mkutils.file_exists(filename) then return filename end
-  -- xhtml is default TeX4th cofig file, use it if we cannot find a user config file
-  return "xhtml"
+  -- xhtml is default TeX4th config file, use it if we cannot find a user config file
+  -- return "xhtml"
+  return config.config_file
 
 end
 
@@ -91,6 +92,7 @@ local function get_metadata(dir, entry)
     dependecies   = {},
     needs_compilation = false,
     output_files  = {},
+    config_file   = config.config_file,     -- always the same, unless overwritten somewhere ?
   }
   metadata.basename, _ = path.splitext(entry)
   metadata.exists = mkutils.file_exists(metadata.absolute_path)
@@ -116,6 +118,18 @@ local function get_files(dir, files)
     end
   end
   return files
+end
+
+--- get metadata for ONE file
+--- @param file string retrieved file
+--- @return metadata
+local function get_metadata_for_filename(filename)
+  local dir, name = path.splitpath(filename)
+  if not ignore_entry(name) then
+      local metadata = get_metadata(dir, name)
+      log:debug("Got metadata for "..metadata.filename)
+      return metadata
+  end
 end
 
 --- filter TeX files from array of files
@@ -147,15 +161,43 @@ local function is_main_tex_file(filename, linecount)
   return false
 end
 
+--- add TeX metadata: can it be compiled standalone, is it a ximera or a xourse
+--- @param filename string name of the tested TeX file
+--- @param linecount number number of lines that should be tested
+--- @return boolean is_main true if the file contains \documentclass
+local function add_tex_metadata(file, linecount)
+  -- we assume that the main TeX file contains \documentclass near beginning of the file 
+  linecount = linecount or 30 -- number of lines that will be read
+  local filename = file.absolute_path
+  local line_no = 0
+  for line in io.lines(filename) do
+    line_no = line_no + 1
+    if line_no > linecount then 
+      file.tex_type='no-document'
+      break end
+      local class_name = line:match("\\documentclass%s*%[[^]]*%]%s*{([^}]+)}")
+                      or line:match("\\documentclass%s*{([^}]+)}")
+          if class_name then
+            file.tex_type = class_name
+            -- log:debug("Document class: " .. class_name)
+            return true
+          end
+  end
+  return false
+end
+
 --- get list of compilable TeX files 
 --- @param files metadata[] list of TeX files to be tested
 --- @return metadata[] main_tex_files list of main TeX files
 local function filter_main_tex_files(files)
   local t = {}
   for _, metadata in ipairs(files) do
-    if is_main_tex_file(metadata.absolute_path, config.documentclass_lines ) then
-      log:debug("Found main TeX file: " .. metadata.absolute_path)
+    -- if is_main_tex_file(metadata.absolute_path, config.documentclass_lines ) then
+    if add_tex_metadata(metadata, config.documentclass_lines ) then
+      log:debug("Found main TeX file: " .. metadata.absolute_path.. " ("..metadata.tex_type..")" )
       t[#t+1] = metadata
+    else 
+      log:debug("No main TeX file: " .. metadata.absolute_path)
     end
   end
   return t
@@ -199,7 +241,7 @@ local function get_tex_dependencies(metadata)
           metadata = get_metadata(current_dir, argument .. ".tex")
         end
         if metadata.exists then
-          log:debug("dependency: ", metadata.absolute_path)
+          log:debug("File "..filename," depends on "..metadata.absolute_path)
           dependecies[#dependecies+1] = metadata
         end
       end
@@ -230,16 +272,20 @@ local function check_output_files(metadata, extensions, compilers)
       status = false
     end
     needs_compilation = needs_compilation or status
-    log:debug("needs compilation", html_file.absolute_path, status)
+    log:debug(string.format("%-5s file %8s: %s",extension,  status and 'COMPILE' or 'OK', html_file.absolute_path))
     --- @class output_file 
     --- @field needs_compilation boolean true if the file needs compilation
     --- @field metadata metadata of the output file 
     --- @field extension string of the output file
-    output_files[#output_files+1] = {
-      needs_compilation = status,
-      metadata          = html_file,
-      extension         = extension
-    }
+    -- output_files[#output_files+1] = {
+    --   needs_compilation = status,
+    --   metadata          = html_file,
+    --   extension         = extension
+    -- }
+    -- Mmm, use a 'flatter' structure for output_files ...
+    html_file.needs_compilation = status
+    html_file.extension         = extension
+    output_files[#output_files+1] = html_file
   end
   return needs_compilation, output_files
 end
@@ -301,10 +347,15 @@ local function needing_compilation(dir, output_formats, compilers)
     -- to speed things up, we will find it only for files that needs a compilation
     if metadata.needs_compilation then
       -- search in the current work dir first, then in  the directory of the TeX file, and project root
-      metadata.config_file = find_config(config.config_file, {lfs.currentdir(), metadata.absolute_dir, abspath(config.dir)})
+      -- TODO: check use of 'config.dir' !!!
+      metadata.config_file = find_config(config.config_file, {lfs.currentdir(), metadata.absolute_dir, abspath(dir)})
       log:debug("Use config file: " .. metadata.config_file)
     end
-    log:debug("main tex file", metadata.filename, metadata.absolute_dir, metadata.extension, status)
+    if status then
+      log:info(string.format("%-5s file %8s: %s", metadata.extension,  status and 'CHANGED' or 'OK', metadata.absolute_path))
+    else
+      log:debug(string.format("%-5s file %8s: %s", metadata.extension,  status and 'CHANGED' or 'OK', metadata.absolute_path))
+    end
   end
 
   -- create ordered list of files that needs to be compiled
@@ -314,7 +365,8 @@ end
 
 
 M.needing_compilation = needing_compilation
-
+M.get_metadata_for_filename = get_metadata_for_filename
+M.get_metadata = get_metadata
 
 
 return M

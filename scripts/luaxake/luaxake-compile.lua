@@ -5,6 +5,7 @@ local pl = require "penlight"
 local mkutils = require("mkutils")
 local path = pl.path
 local html_transform = require "luaxake-transform-html"
+local files = require "luaxake-files"      -- for get_metadaa
 
 
 local log = logging.new("compile")
@@ -16,7 +17,7 @@ local log = logging.new("compile")
 --- @param command string command template
 --- @return string command 
 local function prepare_command(file, command_template)
-  -- replace placeholders like @{filename} with the correspoinding keys from the metadata table
+  -- replace placeholders like @{filename} with the corresponding keys from the metadata table
   return command_template:gsub("@{(.-)}", file)
 end
 
@@ -68,10 +69,11 @@ local function compile(file, compilers, compile_sequence)
     if command_metadata then
       local command_template = command_metadata.command
       -- we need to make a copy of file metadata to insert some additional fields without modification of the original
+      -- log:debug("Command " .. command_template)
       local tpl_table = copy_table(file)
       tpl_table.output_file = output_file
       local command = prepare_command(tpl_table, command_template)
-      log:debug("command " .. command)
+      log:info("Starting " .. command)
       -- we reuse this file from make4ht's mkutils.lua
       local f = io.popen(command, "r")
       local output = f:read("*all")
@@ -100,6 +102,15 @@ local function compile(file, compilers, compile_sequence)
       if command_metadata.check_log then
         info.errors = test_log_file(file.basename .. ".log")
       end
+
+      -- store outputfiles with metadata; TODO: check/fix absolute_path
+      local ofile = files.get_metadata(file.absolute_dir, output_file)
+
+      log:debug("Adding outputfile "..ofile.relative_path.. " to "..file.relative_path)
+      -- require 'pl.pretty'.dump(ofile)
+      table.insert(file.output_files,ofile) 
+      -- require 'pl.pretty'.dump(file)
+
       if command_metadata.process_html then
         info.html_processing_status, info.html_processing_message = html_transform.process(file)
         if not info.html_processing_status then

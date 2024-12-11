@@ -4,6 +4,43 @@ local log = logging.new("transform-html")
 local domobject = require "luaxml-domobject"
 local path = require "pl.path"
 
+local url = require("socket.url")
+-- local url = require "lualibs-url"
+local pl = require "penlight"
+
+
+-- Function to create a backup copy of a file
+local function backup_file(original_filename, extension)
+  -- Determine the backup filename (e.g., "file.txt" -> "file.txt.bak")
+  local backup_filename = original_filename .. "." .. (extension or "ORG")
+
+  -- Open the original file for reading in binary mode
+  local original_file = io.open(original_filename, "rb")
+  if not original_file then
+      log:error("backup_file: Could not open the original file "..original_filename.." for reading.")
+      return false
+  end
+
+  -- Read the entire contents of the original file
+  local content = original_file:read("*all")
+  original_file:close()
+
+  -- Open the backup file for writing in binary mode
+  local backup_file = io.open(backup_filename, "wb")
+  if not backup_file then
+      log:error("backup_file: Could not open the backup file"..backup_filename.." for writing.")
+      return false
+  end
+
+  -- Write the content to the backup file
+  backup_file:write(content)
+  backup_file:close()
+
+  log:debug("Backup created: " .. backup_filename)
+  return true
+end
+
+
 --- find metadata for the HTML file
 ---@param file metadata
 ---@return metadata|nil html file
@@ -11,12 +48,16 @@ local path = require "pl.path"
 local function find_html_file(file)
   -- file metadata passed to the process function are for the TeX file 
   -- we need to find metadata for the output HTML file
+  log:debug("find html for "..file.filename)
   for _, output in ipairs(file.output_files) do
+    -- log:debug("Checking for 'html': "..(output.metadata.filename or "") )
     if output.extension == "html" then
-      return output.metadata
+      log:debug("Returning: "..(output.filename or ""))
+      -- require 'pl.pretty'.dump(output)
+      return output
     end
   end
-  return nil, "Cannot find output HTML file metadata"
+  return nil, "Cannot find output HTML file for "..file.filename
 end
 
 
@@ -29,12 +70,19 @@ local html_cache = {}
 local function load_html(filename)
   -- cache DOM objects
   if not html_cache[filename] then 
+    log:debug("Loading html for "..filename)
     local f = io.open(filename, "r")
     if not f then return nil, "Cannot open HTML file: " .. (filename or "") end
+    log:debug("Opened html for "..filename)
     local content = f:read("*a")
     f:close()
+    -- log:debug("Dumping html for "..filename..": "..content)
     html_cache[filename] = domobject.html_parse(content)
+    log:debug("returning non-cached dom ")
+    return domobject.html_parse(content)
   end
+  log:debug("returning dom ")
+  -- require 'pl.pretty'.dump(domobject.html_parse(content))
   return html_cache[filename]
 end
 
@@ -44,13 +92,18 @@ end
 local function is_xourse(dom, html_file)
   local metas = dom:query_selector("meta[name='description']")
   if #metas == 0 then
-    log:warning("Cannot find any meta[description] tags in " .. html_file.absolute_path)
+    -- log:warning("Cannot find any meta[description] tags in " .. html_file.absolute_path)
+    log:debug("No meta[description] tags in " .. html_file.absolute_path .. " (and thus not a xourse)")
   end
   for _, meta in ipairs(metas) do
     if meta:get_attribute("content") == "xourse" then
+      log:debug("File "..html_file.relative_path.." is a xourse")
       return true
+    else
+      log:debug("File "..html_file.relative_path.." has not-a-xourse description tag  "..(meta.get_attribute("content") or ""))
     end
   end
+  -- log:debug("File "..html_file.relative_path.." is not a xourse ")
   return false
 end
 
@@ -89,8 +142,13 @@ end
 ---@return string href attribute or error message
 local function find_activity_html(file, href)
   -- some activity links don't have links to HTML files
+  -- remove the optional '.tex'
+  if path.extension(href) == ".tex" then href, _ = path.splitext(href) end
   if path.extension(href) == "" then href = href .. ".html" end
   local htmlpath = file.absolute_dir .. "/" .. href
+
+  log:debug("find_activity_html for "..file.filename.." and "..href.." about to return "..htmlpath)
+
   if path.exists(htmlpath) then return htmlpath, href end
   return nil, "Cannot find activity file: " .. htmlpath
 end
@@ -101,7 +159,7 @@ local function read_title_and_abstract(activity_dom)
   local title, abstract
   local title_el = activity_dom:query_selector("title")[1]
   if title_el then title = title_el:get_text() end
-  log:debug("title", title)
+  log:debug("title ", title)
   local abstract_el = activity_dom:query_selector("div.abstract")[1]
   if abstract_el then
     return title, abstract_el:copy_node()
@@ -116,32 +174,44 @@ end
 local function transform_xourse(dom, file)
   for _, activity in ipairs(dom:query_selector("a.activity")) do
     local href = activity:get_attribute("href")
+    log:debug("activity", href)
     if href then
       local htmlpath
       htmlpath, href = find_activity_html(file, href)
+      -- activity:set_attribute("href",href)
       if htmlpath then
         log:debug("activity", htmlpath)
         -- TODO: href has now added .html suffix. but maybe it was without suffix for some specific reason in the first place
         -- so I will not set the fixed href, because it could break something
-        -- activity:set_attribute("href", href)
+        log:debug("Resetting href to "..href) 
+        activity:set_attribute("href", href)
+        -- require 'pl.pretty'.dump(htmlpath)
+
         local activity_dom, msg = load_html(htmlpath)
         if not activity_dom then
           log:error(msg)
         else
           local title, abstract = read_title_and_abstract(activity_dom)
           -- add titles and abstracts from linked activity HTML
-          local parent = activity:get_parent()
-          local pos = activity:find_element_pos()
+          -- local parent = activity:get_parent()
+          local parent = activity
+          -- local pos = activity:find_element_pos()
           if title and title ~= "" then
             local h2 = parent:create_element("h2")
             local h2_text = h2:create_text_node(title )
+            log:debug("Adding h2 for "..href..": "..title) 
             h2:add_child_node(h2_text)
-            parent:add_child_node(h2, pos + 1)
+            parent:add_child_node(h2,1)
           end
           -- the problem with abstract is that Ximera redefines \maketitle in TeX4ht to produce nothing, 
           -- abstract in Ximera is part of \maketitle, so abstracts are missing in the generated HTML
           if abstract then
-            parent:add_child_node(abstract, pos + 2)
+            --require 'pl.pretty'.dump(abstract)
+            local h3 = parent:create_element("h3")
+            local h3_text = h3:create_text_node(abstract:get_text())
+            log:debug("Adding abstract (h3) for "..href..": "..abstract:get_text()) 
+            h3:add_child_node(h3_text)
+            parent:add_child_node(h3,1)
           end
         end
       else
@@ -202,6 +272,76 @@ local function add_dependencies(dom, file)
   return dom
 end
 
+
+
+--- get file extension 
+--- @param relative_path string file path
+--- @return string extension
+local function get_extension(relative_path)
+  return relative_path:match("%.([^%.]+)$")
+end
+
+
+--- Get all files 'associated' with a given file (i.e. images)
+---@param dom DOM_Object
+---@param file metadata
+---@return table
+local function get_associated_files(dom, file)
+  log:debug("get_associated_files for "..file.filename)
+  -- pl.pretty.dump(file)
+  local ass_files = {}
+  local isXimeraFile = dom:query_selector("meta[name='ximera']")[1]
+  if not isXimeraFile then 
+      log:warning(file.filename.." is not a ximera file (no meta[name='ximera' tag])")
+      -- return true, {}
+  end
+
+  local title, abstract = read_title_and_abstract(dom)
+  file.title = title
+  file.abstract = ""
+--   if abstract then
+--     file.abstract = abstract.get_text()
+--     log:debug("GOT IT "..(abstract or ""))
+--   end
+
+  -- log:debug("Added title and abstract")
+
+  -- log:debug("get_associated_files looping "..file.filename)
+
+  for _, img_el in ipairs(dom:query_selector("img") ) do
+    local src = img_el:get_attribute("src")
+    src = (file.dir or ".").."/"..src
+    log:info("Found img "..src)
+    local u = url.parse(src)
+    
+    ass_files[#ass_files+1] = src
+    
+    if false and get_extension(u.path) == "svg"
+    then
+      local png  = u.path:gsub(".svg$", ".png")
+      log:debug("also adding  "..png)
+      ass_files[#ass_files+1] = png
+    end
+    -- sourceUrl, err := url.Parse(source)
+
+    -- if err == nil {
+    --   if sourceUrl.Host == "" {
+    --     imgPath := filepath.Clean(filepath.Join(filepath.Dir(htmlFilename), sourceUrl.Path))
+    --     results = append(results, imgPath)
+
+    --     if filepath.Ext(imgPath) == ".svg" {
+    --       pngFilename := strings.TrimSuffix(imgPath, filepath.Ext(imgPath)) + ".png"
+    --       results = append(results, pngFilename)
+    --     }
+    --   }
+    -- }
+  
+  end
+  log:debug("get_associated_files done "..file.filename)
+
+  return ass_files
+end
+
 --- Save DOM to file
 ---@param dom DOM_Object
 ---@param filename string
@@ -215,15 +355,39 @@ local function save_html(dom, filename)
   return true
 end
 
+
+local function osExecute(cmd)
+  log:info("Exec: "..cmd)
+  local fileHandle = assert(io.popen(cmd .. " 2>&1", 'r'))
+  local commandOutput = assert(fileHandle:read('*a'))
+  local returnCode = fileHandle:close() and 0 or 1
+  commandOutput = string.gsub(commandOutput, "\n$", "")
+  log:info("Gets: "..returnCode..": "..commandOutput)
+  return returnCode, commandOutput
+end
+
 --- Post-process HTML files
 ---@param file metadata 
 ---@return boolean status
 ---@return string? msg
 local function process(file)
+  log:debug("process "..file.absolute_path)
+  
   -- we must find metadata for the HTML file, because `file` is metadata of the TeX file
   local html_file, msg = find_html_file(file)
-  if not html_file then return false, msg end
+  if not html_file then 
+    log:error("No HTML file found")
+    return false, msg 
+  end
+  log:debug("Found html_file "..(html_file.filename or "").." for file "..file.filename)
+
+  
   local html_name = html_file.absolute_path
+  
+  -- only for debugging
+  -- local hash_orig = hash_file(html_name)
+  -- backup_file(html_name, hash_orig..".bak" or "ORIG.bak")
+  
   local dom, msg = load_html(html_name)
   if not dom then return false, msg end
   remove_empty_paragraphs(dom)
@@ -232,9 +396,15 @@ local function process(file)
     transform_xourse(dom, file)
   end
 
-  return save_html(dom, html_name)
+  -- Not needed here ...???
+  -- local ass_files = get_associated_files(dom, html_file)
+  
+
+  return save_html(dom, html_name) 
 end
 
 M.process = process
+M.load_html = load_html
+M.get_associated_files = get_associated_files
 
 return M
