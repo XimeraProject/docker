@@ -6,8 +6,11 @@ local utils = require "pl.utils"
 local path = pl.path
 
 
-logging = require("make4ht-logging")
+logging = require("luaxake-logging")
+
+
 local log = logging.new("luaxake")
+logging.set_outfile("luaxake.log")     -- better make a logfile per day ... ?
 local lapp = require "lapp-mk4"
 local version = "{{version}}"
 
@@ -151,10 +154,10 @@ config = {
 }
 
 
-local files = require "luaxake-files"
+local files   = require "luaxake-files"
 local compile = require "luaxake-compile"
-local frost = require "luaxake-frost"
-
+local frost   = require "luaxake-frost"
+local html    = require "luaxake-transform-html"
 
 config.config_file = args.config
 config.force_compilation = args.force
@@ -205,9 +208,24 @@ end
     log:info(#to_be_compiled.." files need compiling")
   end
 
-  local all_statuses = {}
+  
+  all_labels = {}
 
+  if command == "info" then
+    for i, file in ipairs(tex_files) do
+      log:infof("Info for %s (%s)",file.filename,file.relative_path)
+      
+          local dom, msg = html.load_html(file.relative_path:gsub("tex$", "html"))
+          
+          file.labels = html.get_labels(dom)
+          for k,v in pairs(file.labels) do all_labels[k] = ( all_labels[k] or 0) + v end
+    end
+    require 'pl.pretty'.dump(all_labels)
+  
+  end
 
+      
+      local all_statuses = {}
   -- TODO: fix commands (cfr xmlatex/xmlatex/lua)
   if command == "bake" or command == "compilePdf" or command ==  "compile" then
     log:status("Start "..command)
@@ -250,7 +268,7 @@ if command == "frost" then
   log:status("Start " .. command)
   local ret = frost.frost(root)  
   if ret > 0 then
-    log:error("Frost failedd:")
+    log:error("Frost failed:")
   end
   os.exit(ret)
 end

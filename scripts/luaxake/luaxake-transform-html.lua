@@ -1,6 +1,6 @@
 -- post-process HTML files created by TeX4ht to a form suitable for Ximera
 local M = {}
-local log = logging.new("transform-html")
+local log = logging.new("html")
 local domobject = require "luaxml-domobject"
 local pl = require "penlight"
 local path = require "pl.path"
@@ -130,7 +130,7 @@ end
 local function remove_empty_paragraphs(dom)
   for _, par in ipairs(dom:query_selector("p")) do
     if is_element_empty(par) then
-      log:debug("Removing empty par")
+      log:trace("Removing empty par")
       par:remove_node()
     end
   end
@@ -146,6 +146,20 @@ local function read_title_and_abstract(activity_dom)
     return title, abstract_el:get_text()
   end
   return title, nil
+end
+
+local function get_labels(activity_dom)
+  local labels = {}
+  for i, anchor in ipairs(activity_dom:query_selector("a.ximera-label")) do
+    -- require 'pl.pretty'.dump(anchor)
+    local label = anchor:get_attribute("id")
+    labels[label] = (labels[label] or 0) + 1
+    log:infof("Found label %s", label )
+    if labels[label] > 1 then
+      log:warning("Duplicate label ",label)
+    end 
+  end
+  return labels
 end
 
 --- Transform Xourse files
@@ -401,6 +415,7 @@ end
 
 M.process = process
 M.load_html = load_html
+M.get_labels = get_labels
 M.get_associated_files = get_associated_files
 
 return M

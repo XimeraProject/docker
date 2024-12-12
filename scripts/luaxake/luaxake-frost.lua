@@ -1,7 +1,7 @@
 local M = {}
 local pl = require "penlight"
 local path = require "pl.path"
-local html_transform = require "luaxake-transform-html"
+local html = require "luaxake-transform-html"
 local files = require "luaxake-files"
 local log = logging.new("frost")
 
@@ -57,6 +57,7 @@ local function frost(root)
     -- TODO: warn/error/compile if there are to_be_compiled files ?
 
     local needing_publication = {}
+    local all_labels = {}
     local tex_xourses = {}
     for i, tex_file in ipairs(tex_files) do
         log:debug("Output for "..tex_file.absolute_path)
@@ -71,10 +72,23 @@ local function frost(root)
             needing_publication[#needing_publication + 1] = html_file.relative_path
 
             local html_name = html_file.absolute_path
-            local dom, msg = html_transform.load_html(html_name)
+            local dom, msg = html.load_html(html_name)
             if not dom then return false, msg end
         
-            local ass_files = html_transform.get_associated_files(dom, html_file)
+            -- get all anchors (from \label)
+            html_file.labels = html.get_labels(dom)
+            
+            -- merge them in a big table, to be added to metadata.json
+            for k,v in pairs(html_file.labels) do 
+                if all_labels[k] then
+                    log:warningf("Label %s already used in %s; ignoring for %s",k, all_labels[k], html_file.relative_path)
+                else
+                    all_labels[k] = html_file.relative_path
+                    log:tracef("Label %s added for %s",k,html_file.relative_path)
+                end
+            end
+
+            local ass_files = html.get_associated_files(dom, html_file)
 
             table.move(ass_files, 1, #ass_files, #needing_publication + 1, needing_publication)
 
@@ -96,7 +110,7 @@ local function frost(root)
     -- TODO: add labels; check/fix use of 'github'
     local xmmetadata={
         xakeVersion = "2.1.3",
-        labels = {},
+        labels = all_labels,
         githubexample = {
 
             owner = "XimeraProject",
@@ -178,6 +192,7 @@ local function frost(root)
     -- never reach here ...
 end
 
+M.get_output_files      = get_output_files
 M.frost      = frost
 
 return M
