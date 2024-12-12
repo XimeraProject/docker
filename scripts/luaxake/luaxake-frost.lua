@@ -81,7 +81,7 @@ local function frost(root)
 
             html_file.associated_files = ass_files
 
-            log:info(string.format("Added %4d files for %s, total now %4d", #ass_files+2, html_file.relative_path, #needing_publication))
+            log:info(string.format("Added %4d files for new total of %4d for %s", #ass_files+2,  #needing_publication, html_file.relative_path))
             -- require 'pl.pretty'.dump(to_be_compiled)
 
             -- Store xourses, they have to be added to metadata.json
@@ -134,7 +134,7 @@ local function frost(root)
 
         -- Check the result and exit code
         if exit_code == 0 then
-            log:debug("Files added successfully: "..result)
+            log:debug("Files added successfully")
         else
             log:error("Error adding files. Exit code "..exit_code..": "..(result or ""))
         end
@@ -173,7 +173,7 @@ local function frost(root)
         if result == 0 then
             log:status("Created "..tagName.." for "..commitoid)
         end
-        return result
+        return result, output
     end
     -- never reach here ...
 end

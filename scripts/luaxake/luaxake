@@ -2,7 +2,7 @@
 kpse.set_program_name "luatex"
 
 local pl = require "penlight"
-local lfs = require("lfs")
+local utils = require "pl.utils"
 local path = pl.path
 
 
@@ -23,6 +23,8 @@ Options:
                                    possible values: debug, info, status, warning, error, fatal
 -s,--settings  (default none)      Luaxake settings script
 -v,--version                       Version info
+-f,--force                         Recompile anyway
+-C,--compile   (default none)            Compile sequence (default 'pdf,html', or set in config)
 ]]
 
 -- REMOVED: <dir>  (table)                 Document root directory
@@ -93,6 +95,9 @@ end
 config = {
   -- list of extensions of output files
   output_formats = {"html", "pdf"},
+  -- make4ht_loglevel = "",
+  -- make4ht_mode = "",
+  make4ht_extraoptions= "",
   -- output_formats = {"html", "pdf", "sagetex.sage"},    -- TODO: check/implement sage
   -- number of lines in tex files where we should look for \documentclass
   documentclass_lines = 30,
@@ -107,7 +112,8 @@ config = {
     },
     html = {
       -- command = "make4ht -f html5+dvisvgm_hashes -c @{config_file} -sm draft @{filename}",
-      command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes -s -a debug @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
+      -- command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes -s @{make4ht_mode} -a debug @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
+      command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
       process_html = true,
@@ -134,7 +140,7 @@ config = {
     "idv",
     "lg",
     "tmp",
-    "xref",
+    -- "xref",
     -- "log",
     "auxlock",
     "dvi",
@@ -151,6 +157,7 @@ local frost = require "luaxake-frost"
 
 
 config.config_file = args.config
+config.force_compilation = args.force
 if config.config_file ~= "ximera.cfg" then
   log:warning("Using non-default config file " .. config.config_file)
 end
@@ -160,6 +167,11 @@ if args.settings ~= "none" then
   local configlib = require "luaxake-config"
   log:info("Using settings file: " .. args.settings)
   configlib.update_config(args.settings, config)
+end
+
+if args.compile ~= "none" then
+  config.compile_sequence = utils.split(args.compile,',')
+    log:info("Set compile sequence to " .. args.compile)
 end
 
 config.dirs = dirs
@@ -188,12 +200,13 @@ for i,nextarg in ipairs(config.dirs) do
   table.move(more_tex_files, 1, #more_tex_files, #tex_files+1, tex_files)
 end
 
-  local to_be_compiled = files.sort_dependencies(tex_files)
+  local to_be_compiled = files.sort_dependencies(tex_files, config.force_compilation)
   if #to_be_compiled > 1 then
     log:info(#to_be_compiled.." files need compiling")
   end
 
   local all_statuses = {}
+
 
   -- TODO: fix commands (cfr xmlatex/xmlatex/lua)
   if command == "bake" or command == "compilePdf" or command ==  "compile" then
@@ -203,41 +216,42 @@ end
     else
     for i, file in ipairs(to_be_compiled) do
       log:status(string.format("Compiling file %3d/%d: %s", i, #to_be_compiled, file.absolute_path))
+
       local statuses = compile.compile(file, config.compilers, config.compile_sequence)
       table.insert(all_statuses,statuses)
       compile.print_errors(statuses)
       compile.clean(file, config.clean)
     end
 
-    if #all_statuses == 0 then
-      log:status("Baked "..#to_be_compiled.." files")    -- can n ot occur ??
-    else
-      local errors = {}
-      for _, entry in ipairs(all_statuses) do 
-        for _, info in ipairs(entry) do
-          log:debug("File "..(info.output_file or "UNKNOWN??") .." got status " .. (info.status or 'NIL??') )
-          -- require 'pl.pretty'.dump(info)
-        
-          if (info.status or 0) > 0 then 
-            table.insert(errors, info) 
-          end 
-      end
-      end
-      if #errors > 0 then
-        log:error("Could not bake, got "..#errors.." errors")
-        -- require 'pl.pretty'.dump(errors)
-        os.exit(1)
-      else
-        log:info("Baked "..#to_be_compiled.." files without finding errors")
+    -- filter errors out all statuses
+    local errors = {}
+    for _, entry in ipairs(all_statuses) do 
+      for _, info in ipairs(entry) do
+        log:debug("File "..(info.output_file or "UNKNOWN??") .." got status " .. (info.status or 'NIL??') )
+        -- require 'pl.pretty'.dump(info)
+      
+        if (info.status or 0) > 0 then 
+          table.insert(errors, info) 
+        end 
       end
     end
+    if #errors > 0 then
+      log:error("Could not bake, got "..#errors.." errors")
+      -- require 'pl.pretty'.dump(errors)
+      os.exit(1)
+    else
+      log:info("Baked "..#to_be_compiled.." files without finding errors")
+    end
+  end
 end
-end 
 
 if command == "frost" then
   local root="."     -- frost only for root folder
   log:status("Start " .. command)
   local ret = frost.frost(root)  
+  if ret > 0 then
+    log:error("Frost failedd:")
+  end
   os.exit(ret)
 end
 

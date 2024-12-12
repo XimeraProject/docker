@@ -6,7 +6,7 @@ local mkutils = require("mkutils")
 local path = pl.path
 local html_transform = require "luaxake-transform-html"
 local files = require "luaxake-files"      -- for get_metadaa
-
+local socket = require "socket"
 
 local log = logging.new("compile")
 
@@ -79,8 +79,13 @@ local function compile(file, compilers, compile_sequence)
       -- log:debug("Command " .. command_template)
       local tpl_table = copy_table(file)
       tpl_table.output_file = output_file
+      tpl_table.make4ht_extraoptions = config.make4ht_extraoptions
+      tpl_table.make4ht_mode = config.make4ht_mode
       local command = prepare_command(tpl_table, command_template)
-      log:info("Starting " .. command)
+      local start_time =  socket.gettime()
+
+
+      log:info("Starting " .. command )
       -- we reuse this file from make4ht's mkutils.lua
       local f = io.popen(command, "r")
       local output = f:read("*all")
@@ -89,6 +94,8 @@ local function compile(file, compilers, compile_sequence)
       -- the status code is on the third position 
       -- https://stackoverflow.com/a/14031974/2467963
       local status = rc[3]
+      local end_time = socket.gettime()
+      local compilation_time = end_time - start_time
       if status ~= command_metadata.status then
         log:error("Compilation failed: returns " .. (status or "") ..", but expected ".. command_metadata.status)
         FAIL = true   -- continue for now, to collect logging etc. ...
@@ -126,6 +133,8 @@ local function compile(file, compilers, compile_sequence)
         end
       end
       table.insert(statuses, info)
+      log:info(string.format("Compilation of %s took %.1f seconds (%.20s)", output_file, compilation_time, file.title))
+
       if FAIL then
         break   -- STOP FURTHER COMPILATION
       end

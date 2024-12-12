@@ -2,11 +2,11 @@
 local M = {}
 local log = logging.new("transform-html")
 local domobject = require "luaxml-domobject"
+local pl = require "penlight"
 local path = require "pl.path"
 
 local url = require("socket.url")
 -- local url = require "lualibs-url"
-local pl = require "penlight"
 
 
 -- Function to create a backup copy of a file
@@ -143,9 +143,9 @@ local function read_title_and_abstract(activity_dom)
   log:debug("title ", title)
   local abstract_el = activity_dom:query_selector("div.abstract")[1]
   if abstract_el then
-    return title, abstract_el:copy_node()
+    return title, abstract_el:get_text()
   end
-  return title
+  return title, nil
 end
 
 --- Transform Xourse files
@@ -199,8 +199,8 @@ local function transform_xourse(dom, file)
           if abstract then
             --require 'pl.pretty'.dump(abstract)
             local h3 = parent:create_element("h3")
-            local h3_text = h3:create_text_node(abstract:get_text())
-            log:debug("Adding abstract (h3) for "..href..": "..abstract:get_text()) 
+            local h3_text = h3:create_text_node(abstract)
+            log:debug("Adding abstract (h3) for "..href..": "..abstract) 
             h3:add_child_node(h3_text)
             parent:add_child_node(h3,1)
           end
@@ -282,25 +282,28 @@ local function get_associated_files(dom, file)
   local isXimeraFile = dom:query_selector("meta[name='ximera']")[1]
   if not isXimeraFile then 
       log:warning(file.filename.." is not a ximera file (no meta[name='ximera' tag])")
-      -- return true, {}
   end
 
   local title, abstract = read_title_and_abstract(dom)
-  file.title = title
-  file.abstract = ""
---   if abstract then
---     file.abstract = abstract.get_text()
---     log:debug("GOT IT "..(abstract or ""))
---   end
+  file.title = title or ""
+  file.abstract = abstract or ""
 
-  -- log:debug("Added title and abstract")
+  log:debug(string.format("Added title '%20.20s...' and abstract '%.10s...'", title, abstract))
 
-  -- log:debug("get_associated_files looping "..file.filename)
 
+  -- Add images 
   for _, img_el in ipairs(dom:query_selector("img") ) do
     local src = img_el:get_attribute("src")
     src = (file.dir or ".").."/"..src
     log:info("Found img "..src)
+
+    if not path.exists(src) then
+      log:error("Image file "..src.." does not exist")
+    end
+    if path.getsize(src) == 0 then
+      log:error("Image file "..src.." has size zero")
+    end
+
     local u = url.parse(src)
     
     ass_files[#ass_files+1] = src
@@ -345,15 +348,15 @@ local function save_html(dom, filename)
 end
 
 
-local function osExecute(cmd)
-  log:info("Exec: "..cmd)
-  local fileHandle = assert(io.popen(cmd .. " 2>&1", 'r'))
-  local commandOutput = assert(fileHandle:read('*a'))
-  local returnCode = fileHandle:close() and 0 or 1
-  commandOutput = string.gsub(commandOutput, "\n$", "")
-  log:info("Gets: "..returnCode..": "..commandOutput)
-  return returnCode, commandOutput
-end
+-- local function osExecute(cmd)
+--   log:info("Exec: "..cmd)
+--   local fileHandle = assert(io.popen(cmd .. " 2>&1", 'r'))
+--   local commandOutput = assert(fileHandle:read('*a'))
+--   local returnCode = fileHandle:close() and 0 or 1
+--   commandOutput = string.gsub(commandOutput, "\n$", "")
+--   log:info("Gets: "..returnCode..": "..commandOutput)
+--   return returnCode, commandOutput
+-- end
 
 --- Post-process HTML files
 ---@param file metadata 
@@ -365,12 +368,11 @@ local function process(file)
   -- we must find metadata for the HTML file, because `file` is metadata of the TeX file
   local html_file, msg = find_html_file(file)
   if not html_file then 
-    log:error("No HTML file found")
+    log:error("No HTML file found for "..file.relative_path)
     return false, msg 
   end
-  log:debug("Found html_file "..(html_file.filename or "").." for file "..file.filename)
-
-  
+  -- log:debug("Found html_file "..(html_file.filename or "").." for file "..file.filename)
+ 
   local html_name = html_file.absolute_path
   
   -- only for debugging
@@ -381,6 +383,11 @@ local function process(file)
   if not dom then return false, msg end
   remove_empty_paragraphs(dom)
   add_dependencies(dom, file)
+
+  local title, abstract = read_title_and_abstract(dom)
+  file.title = title or ""
+  file.abstract = abstract or ""
+  
   if is_xourse(dom, html_file) then
     transform_xourse(dom, file)
   end

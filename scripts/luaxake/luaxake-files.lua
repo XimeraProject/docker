@@ -293,7 +293,7 @@ end
 --- create sorted table of files that needs to be compiled 
 --- @param tex_files metadata[] list of TeX files metadata
 --- @return metadata[] to_be_compiled list of files in order to be compiled
-local function sort_dependencies(tex_files)
+local function sort_dependencies(tex_files, force_compilation)
   -- create a dependency graph for files that needs compilation 
   -- the files that include other courses needs to be compiled after changed courses 
   -- at least that is what the original Xake command did. I am not sure if it is really necessary.
@@ -302,7 +302,7 @@ local function sort_dependencies(tex_files)
   local to_be_compiled = {}
   -- first add all used files
   for _, metadata in ipairs(tex_files) do
-    if metadata.needs_compilation then
+    if force_compilation or metadata.needs_compilation then
       Graph:add_edge("root", metadata.absolute_path)
       used[metadata.absolute_path] = metadata
     end
