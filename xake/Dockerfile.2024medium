@@ -1,6 +1,6 @@
 FROM registry.gitlab.com/islandoftex/images/texlive:TL2024-2024-11-17-medium
 
-RUN apt-get update -y  \
+RUN apt-get update -y;  \
     apt-get install -y \
     curl \
     git  git-restore-mtime \
