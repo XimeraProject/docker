@@ -123,66 +123,6 @@ debug() {
         [[ -n "$DEBUG" ]] && echo "DEBUG: $*"
 }
 
-# Set reasonable defaults for variables
-: "${LOCAL_IP:=localhost}"
-
-# XIMERA_URL determines the ximeraServer this repo will be published to by 'serve'
-# By default: localhost:2000, can be overwritten by ENV variable or in config.txt
-: "${XIMERA_URL:=http://localhost:2000/}"     # default: publish to ximera-docker-instance, but 'localhost' does refer to THIS container
-
-# XIMERA_NAME determines the 'name' this repo is published to on the ximeraServer, ie the first part after the hostname
-#  By default the (official) git reponame, converted to lowercase and with dashed-replaced-by-underscores
-# Can be overwritten by ENV variable or in config.txt
-: "${XIMERA_NAME:=$(basename -s .git $(git config --get remote.origin.url) | tr '[:upper:]' '[:lower:]' | tr '-' '_')}"
-
-# : "${XIMERA_REPO:=test}"    # Obsolete (only used in gitlab pipelines)
-: "${NB_JOBS:=2}"             # Degree of parallelism of xake bake
-: "${XAKE:=xake}"             # name of the xake executable 
-: "${LUAXAKE:=/root/texmf/tex/latex/luaxake/luaxake}"
-# : "${LUAXAKE:=texlua /root/texmf/tex/latex/luaxake/luaxake  -s config.lua}"
-
-while getopts ":hitvds" opt; do
-  case ${opt} in
-    h ) 
-       cat <<EOF
-        Build and publish a ximera-repository to a ximera-server (via bake/frost/serve)
-
-        Publishes to $XIMERA_URL$XIMERA_NAME 
-
-	This script is a (docker-)wrapper to 'xake', and contains some extra convenience-functions for building pdf's.
-	
-	Usage:
-        xmlatex compile path/to/file.tex
-        xmlatex compilePdf path/to/file.tex
-        xmlatex bake
-        xmlatex serve     (does ALSO do frost and setup gpg-keys ...!)
-        xmlatex -i bash   (start a shell inside the container)
-	   
-EOF
-       exit 0
-      ;;
-    i )
-        echo "Interactive session"
-        ;;
-    d ) DEBUG=1
-        VERBOSE="-v"
-        XAKE="$XAKE -v"
-        LUAXAKE="$LUAXAKE -l debug "
-      ;;
-    v ) VERBOSE="-v" 
-        XAKE="$XAKE -v"
-        LUAXAKE="$LUAXAKE -l info "
-      ;;
-    s ) XAKE="$XAKE --skip-mathjax"
-      ;;      
-    \? ) echo "Usage: build [-h] [-i] <commands>"
-	 exit 1
-      ;;
-  esac
-done
-shift $((OPTIND -1))
-COMMAND=$1
-
 
 # If there are local versions of ximeraLatex, copy them to the right place  inside the container
 if [[ -f .ximera/ximera.4ht ]]; then
@@ -242,7 +182,8 @@ fi
 if [[ -d .texmf ]]; then
     echo "USING .texmf etc from local repo"
     [[ -d "/root/texmf/tex/generic" ]] || mkdir /root/texmf/tex/generic
-    cp -r .texmf/* /root/texmf/tex/generic/
+    ln -s /code/.texmf /root/texmf/tex/generic/local
+    # cp -r .texmf/* /root/texmf/tex/generic/
 fi
 
 # If there is a .ximera_local folder, OVERWRITE the complete ximeraLatex install inside this container
@@ -263,6 +204,70 @@ PATH=$(pwd):$PATH
 export max_print_line=1000
 export error_line=254
 export half_error_line=238
+
+
+# Set reasonable defaults for variables
+: "${LOCAL_IP:=localhost}"
+
+# XIMERA_URL determines the ximeraServer this repo will be published to by 'serve'
+# By default: localhost:2000, can be overwritten by ENV variable or in config.txt
+: "${XIMERA_URL:=http://localhost:2000/}"     # default: publish to ximera-docker-instance, but 'localhost' does refer to THIS container
+
+# XIMERA_NAME determines the 'name' this repo is published to on the ximeraServer, ie the first part after the hostname
+#  By default the (official) git reponame, converted to lowercase and with dashed-replaced-by-underscores
+# Can be overwritten by ENV variable or in config.txt
+: "${XIMERA_NAME:=$(basename -s .git $(git config --get remote.origin.url) | tr '[:upper:]' '[:lower:]' | tr '-' '_')}"
+
+# : "${XIMERA_REPO:=test}"    # Obsolete (only used in gitlab pipelines)
+: "${NB_JOBS:=2}"             # Degree of parallelism of xake bake
+: "${XAKE:=xake}"             # name of the xake executable 
+: "${LUAXAKE:=$(kpsewhich luaxake)}"
+# : "${LUAXAKE:=texlua /root/texmf/tex/latex/luaxake/luaxake  -s config.lua}"
+
+while getopts ":hitvds" opt; do
+  case ${opt} in
+    h ) 
+       cat <<EOF
+        Build and publish a ximera-repository to a ximera-server (via bake/frost/serve)
+
+        Publishes to $XIMERA_URL$XIMERA_NAME 
+
+	This script is a (docker-)wrapper to 'xake', and contains some extra convenience-functions for building pdf's.
+	
+	Usage:
+        xmlatex compile path/to/file.tex
+        xmlatex compilePdf path/to/file.tex
+        xmlatex bake
+        xmlatex serve     (does ALSO do frost and setup gpg-keys ...!)
+        xmlatex -i bash   (start a shell inside the container)
+	   
+EOF
+       exit 0
+      ;;
+    i )
+        echo "Interactive session"
+        ;;
+    d ) DEBUG=1
+        VERBOSE="-v"
+        XAKE="$XAKE -v"
+        LUAXAKE="$LUAXAKE -l debug "
+      ;;
+    v ) VERBOSE="-v" 
+        XAKE="$XAKE -v"
+        LUAXAKE="$LUAXAKE -l info "
+      ;;
+    s ) XAKE="$XAKE --skip-mathjax"
+      ;;      
+    \? ) echo "Usage: build [-h] [-i] <commands>"
+	 exit 1
+      ;;
+  esac
+done
+shift $((OPTIND -1))
+COMMAND=$1
+
+debug "COMMAND=$COMMAND"
+
 
 
 # After git clone, ALL files seem recent; try to reset them (to prevent baking all files all the time)
@@ -289,9 +294,13 @@ if [[ "$COMMAND" == "bash" ]]
 then
     # interactive shell (option -i needed when starting the container !)
     shift  #  remove "bash"
-    ${XAKE%xake} /bin/bash $*
+    ## Make sure the same varaibles are available in the child shell!
+    ## TODO: remove warnings on readonly variables
+    declare -p >.xmvariables.txt
+    ${XAKE%xake} /bin/bash --rcfile <(cat .xmvariables.txt)  $*
+    rm -f .xmvariables.txt
 
-elif [[ "$COMMAND" == "bake" ]]
+elif [[ "$COMMAND" == "bake" || "$COMMAND" == "all" ]]
 then
     # files with beamer are IGNORED by bake and bakePdf   (should only be compiled to pdf, not html)
     #  do it 'by hand' here
@@ -302,11 +311,11 @@ then
     [[ -f pictures/*.gif ]] && cp pictures/*.gif ximera-downloads
     echo "Compiling beamer and _pdf.tex files ..."
         find \( -name "*beamer*.tex" -o -name "*_pdf.tex" \) -printf '%P\n' | while read file; do
-	ls -al ${file%tex}{tex,pdf,svg,log}
+	    ls -al ${file%tex}{tex,pdf,svg,log}
         if [[ "$file" -nt "${file/%.tex/.pdf}" ]]
         then
              echo "Compiling $file   (beamer)"
-             $XAKE compilePdf $file
+             $LUAXAKE compilePdf $file
              echo "Copying $file to ximera-downloads"
              cp ${file/%.tex/.pdf} ximera-downloads
              echo "Converting $file to svg"
@@ -402,34 +411,26 @@ then
         mkdir -p $(dirname ximera-downloads/"$NAME"_pdf/$file})
         cp ${file/%.tex/.pdf} ximera-downloads/${NAME}_pdf/${file/%.tex/.pdf}
     done
-elif [[ "$COMMAND" == "serve" || "$COMMAND" == "all" || "$COMMAND" == "frost" ]]
+fi
+if [[ "$COMMAND" == "all" || "$COMMAND" == "frost" ]] 
 then
-    echo "Doing xake $COMMAND"
-
-    # 'all' does also bake (should not harm to do it *always*, except for VERY SPECIFIC cases,
-    #  e.g. adhoc manipulation of .html files ...)
-    if [[ "$COMMAND" = "all" ]] 
-    then
-        echo "Baking ..."
-        $LUAXAKE  bake .  || error "Could not bake"
-        # texlua  /root/texmf/tex/latex/luaxake/luaxake  -l debug -s config.lua  bake .  || error "Could not bake"
-        # $XAKE --jobs $NB_JOBS bake      # Generate html files
-    fi
-
-    if [[ "$COMMAND" = "all" || "$COMMAND" = "frost" ]] 
-    then
-        echo "Frosting ..."
+        debug "Frosting ..."
 
         [[ -n "$XM_FROST_WITH_UNCOMMITTED_CHANGES" ]] && FROST="Frost"
 
+
         # set git name and email if not yet set (e.g. in vanilla docker container)
-        git config  --get user.name  || git config user.name "xmlatex Xake"
-        git config  --get user.email || git config user.email "xmlatex@xakecontainer"
+        git config  --get user.name  >/dev/null || { echo Setting git user.name; git config user.name "xmlatex Xake"; }
+        git config  --get user.email >/dev/null || git config user.email "xmlatex@xakecontainer"
 
 
         $LUAXAKE  frost .  || error "Could not frost"  
-        # texlua  /root/texmf/tex/latex/luaxake/luaxake  -l debug -s config.lua  frost .  || error "Could not frost"  
-        #  $XAKE $FROST || error "xake $FROST failed, you might want to set XM_FROST_WITH_UNCOMMITTED_CHANGED (e.g. in config.txt)"  
+ 
+fi
+if [[ "$COMMAND" == "serve" || "$COMMAND" == "all" ]]
+then
+    echo "Doing xake $COMMAND"
+
 
         if [[ -n "$DEBUG" ]]
         then
@@ -442,7 +443,6 @@ then
             echo "git remote -v:"
             git remote -v
         fi
-    fi
 
     echo "Preparing serve (gpg stuff) ..."
 
@@ -706,10 +706,18 @@ then
         echo "No changes. Your repo was already uptodate."
     fi
 
-else
-    # Hope that 'xake $*' was intended ...; if not, xake will complain.
+elif [[ "$COMMAND" == "luaxake" ]]
+then
+    # Use $LUAXAKE to fix thre path (cfr supra)
+    shift
     echo "Starting $LUAXAKE $*"
     $LUAXAKE $*
+elif [[ "$COMMAND" == "other" ]]
+then
+    # You can do whatever you want. Be carefull though.
+    shift
+    echo "Starting $*"
+    $*
 fi
 
 #exit 0; % would ignore (some) errors; might be relevant in CI/CD context
