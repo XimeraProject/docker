@@ -9,8 +9,6 @@ RUN apt-get update -y;  \
     jq \
     vim wget strace less 
 
-
-
  
 ADD hashcash_1.22-1_amd64.deb .
 RUN dpkg -i hashcash_1.22-1_amd64.deb
@@ -31,6 +29,7 @@ ADD scripts/xmlatex     /usr/local/bin/xmlatex.xake
 
 ADD scripts/luaxake /root/texmf/tex/latex/luaxake
 
+RUN ln -s /root/texmf/tex/latex/luaxake/luaxake /usr/local/bin/luaxake
 
 RUN git config --global --add safe.directory /code
 
