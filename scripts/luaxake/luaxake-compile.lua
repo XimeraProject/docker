@@ -4,7 +4,7 @@ local error_logparser = require("make4ht-errorlogparser")
 local pl = require "penlight"
 local mkutils = require("mkutils")
 local path = pl.path
-local html_transform = require "luaxake-transform-html"
+local html = require "luaxake-transform-html"
 local files = require "luaxake-files"      -- for get_metadaa
 local socket = require "socket"
 
@@ -64,6 +64,12 @@ local function compile(file, compilers, compile_sequence)
   -- Start ALL compilations for this file, in the correct order; stop as soon as one fails...
   for _, extension in ipairs(compile_sequence) do
     local command_metadata = compilers[extension]
+
+    if not command_metadata then
+      log:errorf("No compiler defined for %s (%s)",extension,file.relative_path)
+      error("No compiler defined for "..extension)
+    end
+
     local output_file = file.filename:gsub("tex$", extension)
     if command_metadata and command_metadata.check_file then
       -- sometimes compiler wants to check for the output file (like for sagetex.sage),
@@ -127,7 +133,7 @@ local function compile(file, compilers, compile_sequence)
       -- require 'pl.pretty'.dump(file)
 
       if command_metadata.process_html then
-        info.html_processing_status, info.html_processing_message = html_transform.process(file)
+        info.html_processing_status, info.html_processing_message = html.process(file)
         if not info.html_processing_status then
           log:error("Error in HTML post processing: " .. (info.html_processing_message or ""))
         end

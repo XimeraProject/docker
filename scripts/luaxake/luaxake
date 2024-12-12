@@ -96,22 +96,33 @@ end
 --- @field config_file string TeX4ht config file 
 
 config = {
-  -- list of extensions of output files
-  output_formats = {"html", "pdf"},
-  -- make4ht_loglevel = "",
-  -- make4ht_mode = "",
-  make4ht_extraoptions= "",
-  -- output_formats = {"html", "pdf", "sagetex.sage"},    -- TODO: check/implement sage
-  -- number of lines in tex files where we should look for \documentclass
-  documentclass_lines = 30,
+  -- list of outputs ( and extensions )
+  output_formats = {"html", "pdf", "handout.pdf"},
+  compile_sequence = {"pdf", "html"},
+  -- compile_sequence = {"pdf", "sagetex.sage", "pdf", "html"},
   compilers = {
+    ddd = {
+      -- this doesn't work well
+      -- command = 'pdflatex -interaction=nonstopmode  -file-line-error -shell-escape  "\\PassOptionsToClass{tikzexport}{ximera}\\PassOptionsToClass{xake}{ximera}\\PassOptionsToClass{xake}{xourse}\\nonstopmode\\input{@{filename}}"',
+      -- command = 'pdflatex -interaction=nonstopmode  -file-line-error -shell-escape  "\\PassOptionsToClass{xake}{ximera}\\PassOptionsToClass{xake}{xourse}\\input{@{filename}}"',
+      command = 'date >@{basename}.ddd',     -- mmm, this increases the .jax file !!!
+      check_log = false, -- check log
+      status = 0, -- check that the latex command return 0
+    },
     pdf = {
       -- this doesn't work well
       -- command = 'pdflatex -interaction=nonstopmode  -file-line-error -shell-escape  "\\PassOptionsToClass{tikzexport}{ximera}\\PassOptionsToClass{xake}{ximera}\\PassOptionsToClass{xake}{xourse}\\nonstopmode\\input{@{filename}}"',
       -- command = 'pdflatex -interaction=nonstopmode  -file-line-error -shell-escape  "\\PassOptionsToClass{xake}{ximera}\\PassOptionsToClass{xake}{xourse}\\input{@{filename}}"',
       command = 'pdflatex -interaction=nonstopmode  -file-line-error -shell-escape  "\\input{@{filename}}"',     -- mmm, this increases the .jax file !!!
       check_log = true, -- check log
-      status = 0 -- check that the latex command return 0
+      status = 0, -- check that the latex command return 0
+      extension = "pdf",
+    },
+    ["handout.pdf"] = {
+      command = 'pdflatex -interaction=nonstopmode  -file-line-error -shell-escape  -jobname @{basename}.handout "\\PassOptionsToClass{handout}{ximera}\\PassOptionsToClass{handout}{xourse}\\input{@{filename}}"',
+      check_log = true, -- check log
+      status = 0, -- check that the latex command return 0
+      extension = "handout.pdf",
     },
     html = {
       -- command = "make4ht -f html5+dvisvgm_hashes -c @{config_file} -sm draft @{filename}",
@@ -120,17 +131,28 @@ config = {
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
       process_html = true,
+      extension = "html",
     },
     ["sagetex.sage"] = {
       command = "sage @{output_file}",
       check_log = true, -- check log
       check_file = true, -- check if the sagetex.sage file exists
-      status = 0 -- check that the latex command return 0
+      status = 0, -- check that the latex command return 0
+      extension = "sage",   -- ?
     },
 
   },
-  compile_sequence = {"pdf", "html"},
-  -- compile_sequence = {"pdf", "sagetex.sage", "pdf", "html"},
+  -- used for dependency-checking in .tex files
+  input_commands = {
+    input=true, 
+    include=true, 
+    includeonly=true,
+    activity=true, 
+    activitychapter=true, 
+    activitysection=true, 
+    practicechapter=true, 
+    practicesection=true, 
+  }, 
   clean = {
     -- "aux",
     "4ct",
@@ -149,9 +171,21 @@ config = {
     "dvi",
     "scmd",
     "sout",
-  }
-
+  },
+  -- make4ht_loglevel = "",
+  -- make4ht_mode = "",
+  make4ht_extraoptions= "",
+  -- output_formats = {"html", "pdf", "sagetex.sage"},    -- TODO: check/implement sage
+  -- number of lines in tex files where we should look for \documentclass
+  documentclass_lines = 30,
 }
+
+-- set/add potential default dependencies
+if not config.default_dependencies and path.exists("xmPreamble.tex") then
+  log:info("Adding default dependency xmPreamble.tex")
+  config.default_dependencies = { "xmPreamble.tex" }
+end
+
 
 
 local files   = require "luaxake-files"
@@ -174,7 +208,8 @@ end
 
 if args.compile ~= "none" then
   config.compile_sequence = utils.split(args.compile,',')
-    log:info("Set compile sequence to " .. args.compile)
+  config.output_formats   = utils.split(args.compile,',')
+  log:info("Set compile_sequence and output_formats to " .. args.compile)
 end
 
 config.dirs = dirs
@@ -185,10 +220,17 @@ for i,nextarg in ipairs(config.dirs) do
   log:info("Processing argument " .. nextarg)
 
   local more_tex_files
+  
+  -- an existing TeX-file, but without the extension
+  if not path.isfile(nextarg) and path.isfile(nextarg..".tex" ) then    
+    log:trace("Adding .tex extension to file "..nextarg)
+    nextarg = nextarg..".tex"
+  end
   if path.isdir(nextarg) then
     
     more_tex_files = files.get_tex_files_with_status(nextarg, config.output_formats, config.compilers)
-  elseif  path.isfile(nextarg) and nextarg:match("%.tex$") ~= nil then
+  elseif    ( path.isfile(nextarg) and nextarg:match("%.tex$") ~= nil   )     -- an existing TeX-file
+  then
     local metadata = files.get_metadata_for_filename(nextarg)
     metadata.needs_compilation = true;
     log:debug("Explicitly adding tex file "..metadata.filename)
@@ -203,6 +245,7 @@ for i,nextarg in ipairs(config.dirs) do
   table.move(more_tex_files, 1, #more_tex_files, #tex_files+1, tex_files)
 end
 
+log:trace("Finding dependencies, and sorting files accordingly")
   local to_be_compiled = files.sort_dependencies(tex_files, config.force_compilation)
   if #to_be_compiled > 1 then
     log:info(#to_be_compiled.." files need compiling")

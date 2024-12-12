@@ -2,11 +2,10 @@ local M = {}
 local pl = require "penlight"
 local graph = require "luaxake-graph"
 local log = logging.new("files")
-local mkutils = require "mkutils"
+-- local mkutils = require "mkutils"
 local lfs = require "lfs"
 
 local path = pl.path
-
 local abspath = pl.path.abspath
 
 --- identify, if the file should be ignored
@@ -14,7 +13,7 @@ local abspath = pl.path.abspath
 --- @return boolean should_be_ignored if file should be ignored
 local function ignore_entry(entry)
   -- files that should be ignored
-  if entry:match("^%.") then return true end
+  if entry:match("^%.") then return true end   -- ignore 'hidden' files/dirs (i. that start with a '.')
   return false
 end
 
@@ -45,20 +44,26 @@ local function find_config(filename, directories)
   -- in any case, we must provide a full path to the config file, because it will 
   -- be used in different directories. 
   for _, dir in ipairs(directories) do
-    local path = dir .. "/" .. filename
-    if mkutils.file_exists(path) then
-      return path
+    local lpath = dir .. "/" .. filename
+    if pl.path.exists(lpath) then
+      log:trace("find_config found "..filename.. " in ".. lpath.."( from "..table.concat(directories,', ')..")")
+      return lpath
     end
   end
   -- if we cannot find the config file in any directory, try to find it using kpse
-  local path = kpse.find_file(filename, "texmfscripts")
-  if path then return path end
+  local lpath = kpse.find_file(filename, "texmfscripts")
+  if lpath then
+    log:trace("find_config found "..filename.. " in ".. lpath.."( from kpse texmfscripts)")
+    return lpath 
+  end
   -- lastly, test if it is a full path to the file
-  if mkutils.file_exists(filename) then return filename end
+  if pl.path.exists(filename) then 
+    log:trace("find_config found "..filename.. " ( as this file happens to exist)")
+    return filename
+  end
   -- xhtml is default TeX4th config file, use it if we cannot find a user config file
   -- return "xhtml"
   return config.config_file
-
 end
 
 --- get absolute and relative file path, as well as other file metadata
@@ -68,23 +73,23 @@ end
 local function get_metadata(dir, entry)
   local relative_path = string.format("%s/%s", dir, entry)
   --- @class metadata 
-  --- @field dir string relative directory path of the file 
-  --- @field absolute_dir string absolute directory path of the file
-  --- @field filename string filename of the file
-  --- @field basename string filename without extension
-  --- @field extension string file extension
-  --- @field relative_path string relative path of the file 
-  --- @field absolute_path string absolute path of the file
-  --- @field modified number last modification time 
-  --- @field dependecies metadata[] list of files the file depends on
+  --- @field dir            string        relative directory path of the file 
+  --- @field absolute_dir   string        absolute directory path of the file
+  --- @field filename       string        filename of the file
+  --- @field basename       string        filename without extension
+  --- @field extension      string        file extension
+  --- @field relative_path  string        relative path of the file 
+  --- @field absolute_path  string        absolute path of the file
+  --- @field modified       number        last modification time 
+  --- @field dependecies    metadata[]    list of files the file depends on
   --- @field needs_compilation boolean 
-  --- @field exists boolean true if file exists
-  --- @field output_files output_file[]
-  --- @field config_file? string TeX4ht config file
+  --- @field exists         boolean       true if file exists
+  --- @field output_files   output_file[]
+  --- @field config_file?   string        TeX4ht config file
   local metadata = {
-    dir = dir,
-    absolute_dir = abspath(dir),
-    filename = entry,
+    dir           = dir,
+    absolute_dir  = abspath(dir),
+    filename      = entry,
     relative_path = relative_path,
     absolute_path = abspath(relative_path),
     modified      = path.getmtime(relative_path),
@@ -95,7 +100,7 @@ local function get_metadata(dir, entry)
     config_file   = config.config_file,     -- always the same, unless overwritten somewhere ?
   }
   metadata.basename, _ = path.splitext(entry)
-  metadata.exists = mkutils.file_exists(metadata.absolute_path)
+  metadata.exists      = path.exists(metadata.absolute_path)
   return metadata
 end
 
@@ -218,23 +223,21 @@ local function is_up_to_date(tex, html)
   return status
 end
 
-local input_commands = {input=true, activity=true, include=true, includeonly=true}
-
 --- get list of files included in the given TeX file
 --- @param metadata metadata TeX file metadata
 --- @return metadata[] dependecies list of files included from the file
 local function get_tex_dependencies(metadata)
-  local filename = metadata.absolute_path
+  local filename    = metadata.absolute_path
   local current_dir = metadata.absolute_dir
+  local dependecies = config.default_dependencies     --- XXX
   local f = io.open(filename, "r")
-  local dependecies = {}
   if f then
     local content = f:read("*a")
     f:close()
     -- loop over all LaTeX commands with arguments
     for command, argument in content:gmatch("\\(%w+)%s*{([^%}]+)}") do
       -- add dependency if the current command is \input like
-      if input_commands[command] then
+      if config.input_commands[command] then
         local metadata = get_metadata(current_dir, argument)
         if not metadata.exists then
           -- the .tex extension may be missing, so try to read it again
@@ -267,12 +270,12 @@ local function check_output_files(metadata, extensions, compilers)
     -- for some extensions (like sagetex.sage), we need to check if the output file exists 
     -- and stop the compilation if it doesn't
     local compiler = compilers[extension] or {}
-    if compiler.check_file and not mkutils.file_exists(html_file.absolute_path) then
+    if compiler.check_file and not path.exists(html_file.absolute_path) then
       log:debug("Ignored output file doesn't exist: " .. html_file.absolute_path)
       status = false
     end
     needs_compilation = needs_compilation or status
-    log:debug(string.format("%-5s file %8s: %s",extension,  status and 'COMPILE' or 'OK', html_file.absolute_path))
+    log:debugf("%-12s %8s: %s",extension,  status and 'COMPILE' or 'OK', html_file.absolute_path)
     --- @class output_file 
     --- @field needs_compilation boolean true if the file needs compilation
     --- @field metadata metadata of the output file 
@@ -297,32 +300,42 @@ local function sort_dependencies(tex_files, force_compilation)
   -- create a dependency graph for files that needs compilation 
   -- the files that include other courses needs to be compiled after changed courses 
   -- at least that is what the original Xake command did. I am not sure if it is really necessary.
+  log:tracef("Sorting dependencies (%s)", force_compilation)
+
   local Graph = graph:new()
   local used = {}
   local to_be_compiled = {}
   -- first add all used files
   for _, metadata in ipairs(tex_files) do
+    log:tracef("Consider %s", metadata.filename)
+
     if force_compilation or metadata.needs_compilation then
       Graph:add_edge("root", metadata.absolute_path)
       used[metadata.absolute_path] = metadata
     end
   end
+  
   -- now add edges to included files which needs to be recompiled
   for _, metadata in pairs(used) do
     local current_name = metadata.absolute_path
-    for _, child in ipairs(metadata.dependecies) do
+    log:tracef("Get used = %s (%s)",current_name,metadata.dependecies)
+    for _, child in ipairs(metadata.dependecies or {}) do
       local name = child.absolute_path
+      log:tracef("Get child = %s",name)
       -- add edge only to files added in the first run, because only these needs compilation
       if used[name] then
         Graph:add_edge(current_name, name)
       end
     end
   end
+  log:tracef("Topographic sort")
+
   -- topographic sort of the graph to get dependency sequence
   local sorted = Graph:sort()
   -- we need to save files in the reversed order, because these needs to be compiled first
   for i = #sorted, 1, -1 do
     local name = sorted[i]
+    log:tracef("Adding to be compiled %2d: %s",i,name)
     to_be_compiled[#to_be_compiled+1] = used[name]
   end
   return to_be_compiled
@@ -348,12 +361,12 @@ local function get_tex_files_with_status(dir, output_formats, compilers)
       -- search in the current work dir first, then in  the directory of the TeX file, and project root
       -- TODO: check use of 'config.dir' !!!
       metadata.config_file = find_config(config.config_file, {lfs.currentdir(), metadata.absolute_dir, abspath(dir)})
-      log:debug("Use config file: " .. metadata.config_file)
+      if metadata.config_file ~= config.config_file then log:debug("Use config file: " .. metadata.config_file) end
     end
     if status then
-      log:info(string.format("%-5s file %8s: %s", metadata.extension,  status and 'CHANGED' or 'OK', metadata.absolute_path))
+      log:infof("%-12s %8s: %s", metadata.extension,  status and 'CHANGED' or 'OK', metadata.absolute_path)
     else
-      log:debug(string.format("%-5s file %8s: %s", metadata.extension,  status and 'CHANGED' or 'OK', metadata.absolute_path))
+      log:debugf("%-12s %8s: %s", metadata.extension,  status and 'CHANGED' or 'OK', metadata.absolute_path)
     end
   end
 
