@@ -294,8 +294,6 @@ if [[ "$COMMAND" == "bash" ]]
 then
     # interactive shell (option -i needed when starting the container !)
     shift  #  remove "bash"
-    ## Make sure the same varaibles are available in the child shell!
-    ## TODO: remove warnings on readonly variables
     declare -p >.xmvariables.txt
     ${XAKE%xake} /bin/bash --rcfile <(cat .xmvariables.txt)  $*
     rm -f .xmvariables.txt
@@ -706,18 +704,22 @@ then
         echo "No changes. Your repo was already uptodate."
     fi
 
+elif [[ "$COMMAND" == "do" ]]
+then
+    # You can do whatever you want. Be carefull though.
+    shift
+    echo "Starting $*"
+    $*
 elif [[ "$COMMAND" == "luaxake" ]]
 then
     # Use $LUAXAKE to fix thre path (cfr supra)
     shift
     echo "Starting $LUAXAKE $*"
     $LUAXAKE $*
-elif [[ "$COMMAND" == "other" ]]
-then
-    # You can do whatever you want. Be carefull though.
-    shift
-    echo "Starting $*"
-    $*
+# else
+#     # Use $LUAXAKE to fix thre path (cfr supra)
+#     echo "(default) Starting $LUAXAKE $*"
+#     $LUAXAKE $*
 fi
 
 #exit 0; % would ignore (some) errors; might be relevant in CI/CD context

@@ -3,15 +3,17 @@ kpse.set_program_name "luatex"
 
 local pl = require "penlight"
 local utils = require "pl.utils"
+local tablex = require("pl.tablex")
 local path = pl.path
-
+local lapp = require "pl.lapp"
+-- local lapp = require "lapp-mk4"   -- the above is 'better'?
 
 logging = require("luaxake-logging")
-
+-- better make a logfile per day ... ?
+-- NOTE: after a chdir (as in compile...), the logfile would change without the abspath!!
+logging.set_outfile(path.abspath("luaxake.log"))     
 
 local log = logging.new("luaxake")
-logging.set_outfile("luaxake.log")     -- better make a logfile per day ... ?
-local lapp = require "lapp-mk4"
 local version = "{{version}}"
 
 local option_text = [[ 
@@ -27,7 +29,8 @@ Options:
 -s,--settings  (default none)      Luaxake settings script
 -v,--version                       Version info
 -f,--force                         Recompile anyway
--C,--compile   (default none)            Compile sequence (default 'pdf,html', or set in config)
+-C,--compile   (default none)      Compile sequence (default 'pdf,html', or set in config)
+--check                            Check, no cleaning/compiling
 ]]
 
 -- REMOVED: <dir>  (table)                 Document root directory
@@ -98,15 +101,12 @@ end
 config = {
   -- list of outputs ( and extensions )
   output_formats = {"html", "pdf", "handout.pdf"},
-  compile_sequence = {"pdf", "html"},
+  compile_sequence = {"pdf", "html", "handout.pdf"},
+  default_dependencies = {},     -- add here e.g. xmPreamble, ximera.cls, ...
   -- compile_sequence = {"pdf", "sagetex.sage", "pdf", "html"},
   compilers = {
     ddd = {
-      -- this doesn't work well
-      -- command = 'pdflatex -interaction=nonstopmode  -file-line-error -shell-escape  "\\PassOptionsToClass{tikzexport}{ximera}\\PassOptionsToClass{xake}{ximera}\\PassOptionsToClass{xake}{xourse}\\nonstopmode\\input{@{filename}}"',
-      -- command = 'pdflatex -interaction=nonstopmode  -file-line-error -shell-escape  "\\PassOptionsToClass{xake}{ximera}\\PassOptionsToClass{xake}{xourse}\\input{@{filename}}"',
       command = 'date >@{basename}.ddd',     -- mmm, this increases the .jax file !!!
-      check_log = false, -- check log
       status = 0, -- check that the latex command return 0
     },
     pdf = {
@@ -117,12 +117,16 @@ config = {
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
       extension = "pdf",
+      post_command = 'move_to_downloads',
+      download_folder = 'ximera-downloads/with-answers',
     },
     ["handout.pdf"] = {
       command = 'pdflatex -interaction=nonstopmode  -file-line-error -shell-escape  -jobname @{basename}.handout "\\PassOptionsToClass{handout}{ximera}\\PassOptionsToClass{handout}{xourse}\\input{@{filename}}"',
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
       extension = "handout.pdf",
+      post_command = 'move_to_downloads',
+      download_folder = 'ximera-downloads/handouts',
     },
     html = {
       -- command = "make4ht -f html5+dvisvgm_hashes -c @{config_file} -sm draft @{filename}",
@@ -130,7 +134,15 @@ config = {
       command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
-      process_html = true,
+      process_html = false,
+      post_command = 'process_html',
+      extension = "html",
+    },
+    ["draft.html"] = {
+      command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes -m draft -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
+      check_log = true, -- check log
+      status = 0, -- check that the latex command return 0
+      -- post_command = 'process_html',
       extension = "html",
     },
     ["sagetex.sage"] = {
@@ -212,7 +224,41 @@ if args.compile ~= "none" then
   log:info("Set compile_sequence and output_formats to " .. args.compile)
 end
 
+config.check = args.check
+
+local function array_to_set(array)
+  local set = {}
+  for _, v in ipairs(array) do
+      set[v] = true
+  end
+  return set
+end
+
+config.include_extensions = array_to_set({
+  "tex",
+  "html",
+  "sty",
+  "pdf",
+})
+
+
 config.dirs = dirs
+
+
+-- process commands that do not depend on collecting metadata
+
+if command == "frost" then
+  local root="."     -- frost only for root folder
+  log:status("Start " .. command)
+  local ret = frost.frost(root)  
+  if ret > 0 then
+    log:error("Frost failed:")
+  end
+  os.exit(ret)
+end
+
+
+-- collect all metadata / to_be_compiled etc
 
 local tex_files = {}
 for i,nextarg in ipairs(config.dirs) do 
@@ -231,7 +277,7 @@ for i,nextarg in ipairs(config.dirs) do
     more_tex_files = files.get_tex_files_with_status(nextarg, config.output_formats, config.compilers)
   elseif    ( path.isfile(nextarg) and nextarg:match("%.tex$") ~= nil   )     -- an existing TeX-file
   then
-    local metadata = files.get_metadata_for_filename(nextarg)
+    local metadata = files.get_metadata(nextarg)
     metadata.needs_compilation = true;
     log:debug("Explicitly adding tex file "..metadata.filename)
     more_tex_files = { metadata }
@@ -251,34 +297,38 @@ log:trace("Finding dependencies, and sorting files accordingly")
     log:info(#to_be_compiled.." files need compiling")
   end
 
-  
-  all_labels = {}
+  --
+  -- Start processing further commands
+  --
 
-  if command == "info" then
-    for i, file in ipairs(tex_files) do
-      log:infof("Info for %s (%s)",file.filename,file.relative_path)
-      
-          local dom, msg = html.load_html(file.relative_path:gsub("tex$", "html"))
-          
-          file.labels = html.get_labels(dom)
-          for k,v in pairs(file.labels) do all_labels[k] = ( all_labels[k] or 0) + v end
+  if command == "clean" then
+    local n_files_deleted = 0
+    local to_be_cleaned_extensions = tablex.merge(config.clean, config.output_formats,true)   -- append arrays ...
+    log:status("Cleaning files ", to_be_cleaned_extensions)
+    
+    for _,file in ipairs(tex_files) do
+      n_files_deleted = n_files_deleted  + compile.clean(file, to_be_cleaned_extensions, config.check)
     end
-    require 'pl.pretty'.dump(all_labels)
-  
-  end
+
+    -- require 'pl.pretty'.dump(config)
+    -- require 'pl.pretty'.dump(to_be_cleaned_extensions)
+
+    log:infof("Cleaned %d files", n_files_deleted)
+  end 
 
       
-      local all_statuses = {}
   -- TODO: fix commands (cfr xmlatex/xmlatex/lua)
   if command == "bake" or command == "compilePdf" or command ==  "compile" then
     log:status("Start "..command)
+
+    local all_statuses = {}
     if #to_be_compiled == 0 then
       log:status("Nothing to be baked")
     else
     for i, file in ipairs(to_be_compiled) do
       log:status(string.format("Compiling file %3d/%d: %s", i, #to_be_compiled, file.absolute_path))
 
-      local statuses = compile.compile(file, config.compilers, config.compile_sequence)
+      local statuses = compile.compile(file, config.compilers, config.compile_sequence, config.check)
       table.insert(all_statuses,statuses)
       compile.print_errors(statuses)
       compile.clean(file, config.clean)
@@ -306,13 +356,19 @@ log:trace("Finding dependencies, and sorting files accordingly")
   end
 end
 
-if command == "frost" then
-  local root="."     -- frost only for root folder
-  log:status("Start " .. command)
-  local ret = frost.frost(root)  
-  if ret > 0 then
-    log:error("Frost failed:")
+
+if command == "info" then
+  all_labels = {}
+  -- TEST: to be implemented ...?
+  for i, file in ipairs(tex_files) do
+    log:infof("Info for %s (%s)",file.filename,file.relative_path)
+    
+        local dom, msg = html.load_html(file.relative_path:gsub("tex$", "html"))
+        
+        file.labels = html.get_labels(dom)
+        for k,v in pairs(file.labels) do all_labels[k] = ( all_labels[k] or 0) + v end
   end
-  os.exit(ret)
+  require 'pl.pretty'.dump(all_labels)
+
 end
 

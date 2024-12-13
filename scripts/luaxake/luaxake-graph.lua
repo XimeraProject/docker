@@ -95,7 +95,7 @@ function Graph:sort()
     count = count + count_table(tbl)
   end
   if count > 0 then
-    return nil, "Graph has cycles"
+    return nil, "Graph has "..count.." cycles"
   end
   return L
 end

@@ -126,10 +126,10 @@ local function frost(root)
 
     needing_publication[#needing_publication + 1] = "metadata.json"
 
-    if path.exists("ximera-download") then
+    if path.exists("ximera-downloads") then
         needing_publication[#needing_publication + 1] = "ximera-downloads"
     else 
-        log:debug("No ximera-download folder, and thus no PDF files will be available for download")
+        log:debug("No ximera-downloads folder, and thus no PDF files will be available for download")
     end
     -- require 'pl.pretty'.dump(needing_publication)
 

@@ -2,7 +2,6 @@ local M = {}
 local pl = require "penlight"
 local graph = require "luaxake-graph"
 local log = logging.new("files")
--- local mkutils = require "mkutils"
 local lfs = require "lfs"
 
 local path = pl.path
@@ -13,8 +12,19 @@ local abspath = pl.path.abspath
 --- @return boolean should_be_ignored if file should be ignored
 local function ignore_entry(entry)
   -- files that should be ignored
-  if entry:match("^%.") then return true end   -- ignore 'hidden' files/dirs (i. that start with a '.')
-  return false
+  if entry:match("^%.") then -- ignore 'hidden' files/dirs (i. that start with a '.')
+    log:trace("Ignoring file "..entry)
+    return true 
+  end
+  local extension = entry:match(".%.([^%.]+)$")
+  local exts = config.include_extensions
+  if exts[extension] then
+    log:trace("Keeping file "..entry)
+    return false
+  end
+  log:tracef("Ignoring file %s (%s)",entry, extension)
+
+  return true
 end
 
 
@@ -25,12 +35,7 @@ local function get_extension(relative_path)
   return relative_path:match("%.([^%.]+)$")
 end
 
---- normalize directory name to be used in get_files
---- @param dir string
---- @return string
-local function prepare_dir(dir)
-  return dir:gsub("/$", "")
-end
+
 
 --- find TeX4ht config file 
 --- @param filename string name of the config file
@@ -67,11 +72,31 @@ local function find_config(filename, directories)
 end
 
 --- get absolute and relative file path, as well as other file metadata
---- @param dir string current directory
---- @param entry string current filename
+--- @param file string retrieved file
 --- @return metadata
-local function get_metadata(dir, entry)
-  local relative_path = string.format("%s/%s", dir, entry)
+local function get_metadata(relative_path, entry)
+  local dir
+  -- Some hocus pocus to make get_metadata work as
+  --    get_metadata(filename_with_path) 
+  -- or get_metadata(dir, filename)   (where the path is explicitly split ...)
+  -- 202412: only the filename_with_path syntax should work fine ?
+  if not entry then
+    dir, entry = path.splitpath(relative_path)
+  else 
+    dir = relative_path
+    relative_path = string.format("%s/%s",dir,entry)
+  end
+  dir = dir or ""
+
+  log:tracef("Getting metadata for file %s (in %s)", entry, dir)
+  -- We have dir, entry and relative path to fill lot's of variations/combinations...
+  -- needs_compilation is updated later
+
+  if ignore_entry(entry) then
+    log:warningf("Collecting metadata for ignored file %s (%s). Returning nil, hope for the best.", relative_path, entry)
+    return 
+  end
+  
   --- @class metadata 
   --- @field dir            string        relative directory path of the file 
   --- @field absolute_dir   string        absolute directory path of the file
@@ -92,15 +117,21 @@ local function get_metadata(dir, entry)
     filename      = entry,
     relative_path = relative_path,
     absolute_path = abspath(relative_path),
+    exists        = path.exists(relative_path),
     modified      = path.getmtime(relative_path),
-    extension     = get_extension(entry),
     dependecies   = {},
     needs_compilation = false,
     output_files  = {},
     config_file   = config.config_file,     -- always the same, unless overwritten somewhere ?
   }
-  metadata.basename, _ = path.splitext(entry)
-  metadata.exists      = path.exists(metadata.absolute_path)
+  metadata.basename, metadata.extension          = entry:match("(.*)%.([^%.]+)$")
+  metadata.basenameshort, metadata.extensionlong = entry:match("([^%.]*)%.(.+)$")
+  metadata.reldir, metadata.relfile = path.splitpath(metadata.relative_path)
+
+  if config.dump_metadata then
+    log:debugf("Dumping new metadata for %s (%s)", relative_path, metadata.modified )
+    require 'pl.pretty'.dump(metadata)
+  end
   return metadata
 end
 
@@ -109,7 +140,7 @@ end
 --- @param files? table retrieved files
 --- @return metadata[]
 local function get_files(dir, files)
-  dir = prepare_dir(dir)
+  dir = dir:gsub("/$", "")    -- remove potential trailing '/'
   files = files or {}
   for entry in path.dir(dir) do
     if not ignore_entry(entry) then
@@ -125,17 +156,6 @@ local function get_files(dir, files)
   return files
 end
 
---- get metadata for ONE file
---- @param file string retrieved file
---- @return metadata
-local function get_metadata_for_filename(filename)
-  local dir, name = path.splitpath(filename)
-  if not ignore_entry(name) then
-      local metadata = get_metadata(dir, name)
-      log:debug("Got metadata for "..metadata.filename)
-      return metadata
-  end
-end
 
 --- filter TeX files from array of files
 --- @param files metadata[] list of  files to be checked
@@ -150,21 +170,23 @@ local function get_tex_files(files)
   return tbl
 end
 
---- test if the TeX file can be compiled standalone
---- @param filename string name of the tested TeX file
---- @param linecount number number of lines that should be tested
---- @return boolean is_main true if the file contains \documentclass
-local function is_main_tex_file(filename, linecount)
-  -- we assume that the main TeX file contains \documentclass near beginning of the file 
-  linecount = linecount or 30 -- number of lines that will be read
-  local line_no = 0
-  for line in io.lines(filename) do
-    line_no = line_no + 1
-    if line_no > linecount then break end
-    if line:match("^%s*\\documentclass") then return true end
-  end
-  return false
-end
+
+-- OBSOLETE: see add_tex_metadata !
+-- --- test if the TeX file can be compiled standalone
+-- --- @param filename string name of the tested TeX file
+-- --- @param linecount number number of lines that should be tested
+-- --- @return boolean is_main true if the file contains \documentclass
+-- local function is_main_tex_file(filename, linecount)
+--   -- we assume that the main TeX file contains \documentclass near beginning of the file 
+--   linecount = linecount or 30 -- number of lines that will be read
+--   local line_no = 0
+--   for line in io.lines(filename) do
+--     line_no = line_no + 1
+--     if line_no > linecount then break end
+--     if line:match("^%s*\\documentclass") then return true end
+--   end
+--   return false
+-- end
 
 --- add TeX metadata: can it be compiled standalone, is it a ximera or a xourse
 --- @param filename string name of the tested TeX file
@@ -202,7 +224,7 @@ local function filter_main_tex_files(files)
       log:debug("Found main TeX file: " .. metadata.absolute_path.. " ("..metadata.tex_type..")" )
       t[#t+1] = metadata
     else 
-      log:debug("No main TeX file: " .. metadata.absolute_path)
+      log:debug("Not a MAIN TeX file: " .. metadata.absolute_path)
     end
   end
   return t
@@ -214,10 +236,12 @@ end
 ---@return boolean
 local function is_up_to_date(tex, html)
   -- if the output file doesn't exist, it needs recompilation
+  log:tracef("Is %s uptodate? %s",html.relative_path, html.exists and "It exists" or "It doesn't exist")
   if not html.exists then return true end
   -- test if the output file is older if the main file or any dependency
   local status = tex.modified > html.modified
   for _,subfile in ipairs(tex.dependecies or {}) do
+    log:infof("Check modified of %s", subfile.relative_path)
     status = status or subfile.modified > html.modified
   end
   return status
@@ -239,13 +263,15 @@ local function get_tex_dependencies(metadata)
       -- add dependency if the current command is \input like
       if config.input_commands[command] then
         local metadata = get_metadata(current_dir, argument)
-        if not metadata.exists then
+        if not metadata or not metadata.exists then
           -- the .tex extension may be missing, so try to read it again
           metadata = get_metadata(current_dir, argument .. ".tex")
         end
-        if metadata.exists then
+        if metadata and metadata.exists then
           log:debug("File "..filename," depends on "..metadata.absolute_path)
           dependecies[#dependecies+1] = metadata
+        else
+          log:warningf("No metadata found for %s/%s; not added to dependencies.", current_dir, argument)
         end
       end
     end
@@ -331,12 +357,19 @@ local function sort_dependencies(tex_files, force_compilation)
   log:tracef("Topographic sort")
 
   -- topographic sort of the graph to get dependency sequence
-  local sorted = Graph:sort()
-  -- we need to save files in the reversed order, because these needs to be compiled first
+  local sorted, msg = Graph:sort()
+
+  if not sorted then
+    log:errorf("Could not sort dependency Graph: %s", msg)
+    log:errorf("RETURNING UNSORTED LIST")
+    return tex_files
+  else
+    -- we need to save files in the reversed order, because these needs to be compiled first
   for i = #sorted, 1, -1 do
     local name = sorted[i]
     log:tracef("Adding to be compiled %2d: %s",i,name)
     to_be_compiled[#to_be_compiled+1] = used[name]
+  end
   end
   return to_be_compiled
 end
@@ -377,7 +410,6 @@ end
 
 M.get_tex_files_with_status = get_tex_files_with_status
 M.sort_dependencies = sort_dependencies
-M.get_metadata_for_filename = get_metadata_for_filename
 M.get_metadata = get_metadata
 
 
