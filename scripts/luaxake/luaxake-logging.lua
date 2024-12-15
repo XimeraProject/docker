@@ -47,6 +47,8 @@ function logging.prepare_levels(modes)
     mode.level = level
     max_width = math.max(string.len(mode.name), max_width)
   end
+  logging.levels = levels
+
 end
 
 -- the logging level is set once
