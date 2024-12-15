@@ -257,6 +257,17 @@ if command == "frost" then
   os.exit(ret)
 end
 
+if command == "serve" then
+  log:status("Start " .. command)
+  local ret, msg = frost.serve()  
+  if ret > 0 then
+    log:error("Serve failed:", msg)
+  end
+  os.exit(ret)
+  
+  
+end
+
 
 -- collect all metadata / to_be_compiled etc
 

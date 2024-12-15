@@ -31,7 +31,10 @@ local function osExecute(cmd)
     local commandOutput = assert(fileHandle:read('*a'))
     local returnCode = fileHandle:close() and 0 or 1
     commandOutput = string.gsub(commandOutput, "\n$", "")
-    log:debug("returns "..returnCode..": "..commandOutput..".")
+    if returnCode > 0then
+        log:warningf("Command %s returns %d: %s", cmd, returnCode, commandOutput)
+    end
+    log:trace("returns "..returnCode..": "..commandOutput..".")
     return returnCode, commandOutput
 end
 
@@ -45,6 +48,62 @@ local function get_output_files(file, extension)
     end
     return result
 end
+
+-- Recursive function to list all files in a directory
+function list_files(path, files)
+    files = files or {}
+    for file in lfs.dir(path) do
+        -- Skip "." and ".." (current and parent directory)
+        if file ~= "." and file ~= ".." then
+            local full_path = path .. "/" .. file
+            local attr = lfs.attributes(full_path)
+            
+            -- If it's a directory, recurse into it
+            if attr.mode == "directory" then
+                list_files(full_path,files)
+                --table.move(nfiles,1,#nfiles,#files+1,files)
+            else
+                -- If it's a file, print its path
+                -- f:write(full_path.."\n")
+                files[#files+1] = full_path
+             end
+        end
+    end
+    return files
+end
+    
+
+-- -- Function to find the first table with a given key/value using Penlight
+-- local function find_entry(array, key, value)
+--     for _, entry in ipairs(array) do
+--         if entry[key] == value then
+--             return entry  -- Return the first matching entry
+--         end
+--     end
+--     return nil  -- Return nil if no match is found
+--   end
+
+
+-- function move_to_downloads(file, cmd_meta, root_dir)
+--     local folder = string.format("%s/%s/%s",root_dir, cmd_meta.download_folder, file.dir)
+    
+--     require 'pl.pretty'.dump(cmd_meta)
+--     require 'pl.pretty'.dump(file)
+--     local src = find_entry(file.output_files, "extensionlong", cmd_meta.extension)
+--     -- local src = file.output_files[1].absolute_path    -- TODO: fix
+    
+--     local tgt = string.format("%s/%s.%s", folder, file.basename, src.extension)
+--     -- require 'pl.pretty'.dump(src)
+--     if src and path.exists(src.absolute_path) then
+--       log:infof("Moving %s to %s", src.absolute_path, tgt)
+--       pldir.makepath(folder)
+--       plfile.copy(src.absolute_path, tgt)
+--     else
+--       log:warningf("No output file found for ",file.relative_path)
+--     end
+--     return 1, 'NOK'
+--   end
+
 
 --- Frosting: create a 'publications' commit-and-tag
 ---@param file metadata    -- presumably only root-folder really makes sense for 'frosting'
@@ -129,9 +188,30 @@ local function frost(root)
 
     needing_publication[#needing_publication + 1] = "metadata.json"
 
+    -- 
+    -- START FROSTING
+    --
+
+    local _, head_oid = osExecute("git rev-parse HEAD")
+    if not head_oid then
+        log:error("No headid returned by git rev-parse HEAD")
+    end
+
+
+    local publication_branch = "PUB_"..head_oid
+
+    local ret, publication_oid = osExecute("git rev-parse --verify --quiet "..publication_branch)
+
+    if ret > 0 then
+        osExecute("git branch "..publication_branch)
+        publication_oid = head_oid
+    end
+    log:debug("GOT publication_oid "..(publication_oid or ""))
+
+
     if path.exists("ximera-downloads") then
         -- needing_publication[#needing_publication + 1] = "ximera-downloads"
-        osExecute(" git add -f ximera-dowloads")
+        osExecute("git add -f ximera-downloads")
     else 
         log:debug("No ximera-downloads folder, and thus no PDF files will be available for download")
     end
@@ -141,33 +221,8 @@ local function frost(root)
     -- local files_string = table.concat(needing_publication,",")
     -- Execute the git add command
 
-    
-
--- Recursive function to list all files in a directory
-function list_files(path, files)
-    files = files or {}
-    for file in lfs.dir(path) do
-        -- Skip "." and ".." (current and parent directory)
-        if file ~= "." and file ~= ".." then
-            local full_path = path .. "/" .. file
-            local attr = lfs.attributes(full_path)
-            
-            -- If it's a directory, recurse into it
-            if attr.mode == "directory" then
-                list_files(full_path,files)
-                --table.move(nfiles,1,#nfiles,#files+1,files)
-            else
-                -- If it's a file, print its path
-                -- f:write(full_path.."\n")
-                files[#files+1] = full_path
-             end
-        end
-    end
-    return files
-end
-
-local downloads =  list_files("ximera-downloads")
-table.move(downloads, 1, #downloads, #needing_publication + 1, needing_publication)
+    -- local downloads =  list_files("ximera-downloads")
+    -- table.move(downloads, 1, #downloads, #needing_publication + 1, needing_publication)
 
 
     local f = io.open(".xmgitindexfiles", "w")
@@ -185,59 +240,97 @@ table.move(downloads, 1, #downloads, #needing_publication + 1, needing_publicati
     if not success then
         log:errorf("git update-index fails with %s (%d)",reason, exit_code)
     else 
-        log:debugf("Added %d files:\n%s", #needing_publication,output)
-    end
-
-    local _, sourceoid = osExecute("git write-tree")
-    if not sourceoid then
-        log:error("No sourceid returned by git write-tree")
-    end
-    log:debug("GOT source "..(sourceoid or ""))
-
-    local _, headid = osExecute("git rev-parse HEAD")
-    if not headid then
-        log:error("No headid returned by git rev-parse HEAD")
+        log:debugf("Added %d files (%s)", #needing_publication,output)
     end
 
 
-    local ret, commitoid = osExecute("git commit-tree -m Publishedxxx -p "..headid.." "..sourceoid)
-    if not commitoid then
-        log:error("No commitoid returned by git commit-tree")
+    local _, new_tree = osExecute("git write-tree")
+    if not new_tree then
+        log:error("No tree returned by git write-tree")
     end
-    log:debug("GOT commit "..(commitoid or ""))
+    log:debug("Made new tree ", new_tree)
+
+
+
+    -- local tagName = "publications/"..head_oid
+
+    -- result, tag_oid = osExecute("git for-each-ref --sort=-creatordate --count=1 --format '%(refname:strip=2)' refs/tags/publications/*")
+    
+    local result, most_recent_publication = osExecute("git for-each-ref --sort=-creatordate --count=1 --format '%(tree) %(objectname) %(refname:strip=2)' refs/tags/publications/*")
+
+    if not most_recent_publication or most_recent_publication == "" then
+        log:info("No publication found")
+    else
+
+        log:debugf("Got publication: %s",most_recent_publication)
+
+    
+        local tagtree_oid, tag_oid, tagName = most_recent_publication:match("([^%s]+) ([^%s]+) ([^%s]+)")
+
+        log:infof("Found %s  (tree:%s tag:%s) ", tagName, tagtree_oid, tag_oid)
+
+    end
+
+    if tagtree_oid and tagtree_oid == new_tree then
+        log:statusf("Tag "..tagName.." already exists (for %s)",tag_oid)
+        return 0, 'OK'
+    end
+    
+    
+
+    local ret, commit_oid = osExecute("git commit-tree -m "..publication_branch.." -p "..publication_oid.." "..new_tree)
+    log:debug("GOT commit "..(commit_oid or ""))
     
     if logging.show_level <= logging.levels["trace"] then
-        log:tracef("Committed files for %s:", commitoid)
-        osExecute("git ls-tree -r --name-only "..commitoid)
+        log:tracef("Committed files for %s:", commit_oid)
+        osExecute("git ls-tree -r --name-only "..commit_oid)
     end
 
-    local tagName = "publications/"..headid
+    local ret, output = osExecute("git reset")
 
-    result, output = osExecute("git rev-parse "..tagName.." --")
-
-
-    if result then
-        if output == commitoid
-        then
-            log:status("Tag "..tagName.." already exists")
-            return 0
-        else
-            log:infof("Updating tag %s for %s (was %s)", tagName, commitoid, output)
-            result, output = osExecute("git update-ref "..tagName.." "..commitoid)
-            return result, output
-        end
+    if false and tagtree_oid then
+        log:statusf("Updating tag %s for %s (was %s)", tagName, commit_oid, tag_oid)
+        result, output = osExecute("git update-ref refs/tags/"..tagName.." "..commit_oid)
+        return result, output
     else
-        log:info("Creating tag "..tagName.." for "..commitoid)
-        result, output = osExecute("git tag "..tagName.." "..commitoid)
-        if result == 0 then
-            log:status("Created "..tagName.." for "..commitoid)
+        --local tagName = "publications/"..os.date("%Y%m%d_%H%M%S")
+        local tagName = "publications/"..commit_oid
+        log:statusf("Creating tag %s for %s", tagName, commit_oid)
+        ret, output = osExecute("git tag "..tagName.." "..commit_oid)
+        if ret > 0 then
+            log:errorf("Created tag %s for %s: %s", tagName, commit_oid, output)
         end
         return result, output
     end
     -- never reach here ...
 end
 
+local function serve()
+
+    local result, most_recent_publication = osExecute("git for-each-ref --sort=-creatordate --count=1 --format '%(tree) %(objectname) %(refname:strip=2)' refs/tags/publications/*")
+
+    if not most_recent_publication or most_recent_publication == "" then
+        log:warning("No publication tags found. Need 'frost' first?")
+        return 1, 'No publications found'
+    end
+
+    log:debugf("Got publication: %s",most_recent_publication)
+
+    
+    local tree_oid, tag_oid, tagName = most_recent_publication:match("([^%s]+) ([^%s]+) ([^%s]+)")
+
+    log:infof("Publishing  %s  (tree:%s tag:%s) ", tagName, tree_oid, tag_oid)
+    
+    osExecute("git push -f ximera "..tagName)
+    osExecute("git push -f ximera "..tag_oid..":master")
+    
+    log:statusf("Published  %s", tagName)
+
+    return 0,'OK'
+end
+
 M.get_output_files      = get_output_files
 M.frost      = frost
+M.serve      = serve
 
 return M

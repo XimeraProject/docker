@@ -65,8 +65,8 @@ end
 function move_to_downloads(file, cmd_meta, root_dir)
   local folder = string.format("%s/%s/%s",root_dir, cmd_meta.download_folder, file.dir)
   
-  require 'pl.pretty'.dump(cmd_meta)
-  require 'pl.pretty'.dump(file)
+  -- require 'pl.pretty'.dump(cmd_meta)
+  -- require 'pl.pretty'.dump(file)
   local src = find_entry(file.output_files, "extensionlong", cmd_meta.extension)
   -- local src = file.output_files[1].absolute_path    -- TODO: fix
   
@@ -140,6 +140,7 @@ local function compile(file, compilers, compile_sequence, only_check)
       if only_check then
         log:info("Running in check-modus: SKIPPING " .. command )
       else
+        log:info("Running " .. command )
       -- we reuse this file from make4ht's mkutils.lua
       local f = io.popen(command, "r")
       output = f:read("*all")
