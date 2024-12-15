@@ -250,9 +250,9 @@ config.dirs = dirs
 if command == "frost" then
   local root="."     -- frost only for root folder
   log:status("Start " .. command)
-  local ret = frost.frost(root)  
+  local ret, msg = frost.frost(root)  
   if ret > 0 then
-    log:error("Frost failed:")
+    log:error("Frost failed:", msg)
   end
   os.exit(ret)
 end
@@ -273,7 +273,6 @@ for i,nextarg in ipairs(config.dirs) do
     nextarg = nextarg..".tex"
   end
   if path.isdir(nextarg) then
-    
     more_tex_files = files.get_tex_files_with_status(nextarg, config.output_formats, config.compilers)
   elseif    ( path.isfile(nextarg) and nextarg:match("%.tex$") ~= nil   )     -- an existing TeX-file
   then
@@ -300,6 +299,13 @@ log:trace("Finding dependencies, and sorting files accordingly")
   --
   -- Start processing further commands
   --
+
+  if command == "info" then
+    log:info("Got tex files:")
+    for _,file in ipairs(tex_files) do
+        print(file.relative_path)
+    end
+  end
 
   if command == "clean" then
     local n_files_deleted = 0

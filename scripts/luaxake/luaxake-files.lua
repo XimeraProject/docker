@@ -16,15 +16,23 @@ local function ignore_entry(entry)
     log:trace("Ignoring file "..entry)
     return true 
   end
-  local extension = entry:match(".%.([^%.]+)$")
-  local exts = config.include_extensions
-  if exts[extension] then
-    log:trace("Keeping file "..entry)
-    return false
-  end
-  log:tracef("Ignoring file %s (%s)",entry, extension)
+  return false
 
-  return true
+  -- does not work properly, eg. with clean: just add everything...
+  -- local attr = lfs.attributes(entry)
+  -- if attr and attr.mode == "directory" then
+  --   log:trace("Keeping folder "..entry)
+  --   return false
+  -- end
+  -- local extension = entry:match(".%.([^%.]+)$")
+  -- local exts = config.include_extensions
+  -- if exts[extension] then
+  --   log:trace("Keeping file "..entry)
+  --   return false
+  -- end
+  -- log:tracef("Ignoring file %s (%s)",entry, extension)
+
+  -- return true
 end
 
 
@@ -93,8 +101,8 @@ local function get_metadata(relative_path, entry)
   -- needs_compilation is updated later
 
   if ignore_entry(entry) then
-    log:warningf("Collecting metadata for ignored file %s (%s). Returning nil, hope for the best.", relative_path, entry)
-    return 
+    log:warningf("Collecting metadata for ignored file %s (%s).", relative_path, entry)
+    -- return 
   end
   
   --- @class metadata 
@@ -153,6 +161,7 @@ local function get_files(dir, files)
       end
     end
   end
+  log:debugf("get_files returns %d files", #files)
   return files
 end
 
@@ -241,7 +250,7 @@ local function is_up_to_date(tex, html)
   -- test if the output file is older if the main file or any dependency
   local status = tex.modified > html.modified
   for _,subfile in ipairs(tex.dependecies or {}) do
-    log:infof("Check modified of %s", subfile.relative_path)
+    -- log:tracef("Check modified of %s", subfile.relative_path)
     status = status or subfile.modified > html.modified
   end
   return status

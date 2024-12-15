@@ -26,7 +26,7 @@ local function save_as_json(xmmetadata)
   
 
 local function osExecute(cmd)
-    log:info("Exec: "..cmd)
+    log:debug("Exec: "..cmd)
     local fileHandle = assert(io.popen(cmd .. " 2>&1", 'r'))
     local commandOutput = assert(fileHandle:read('*a'))
     local returnCode = fileHandle:close() and 0 or 1
@@ -73,7 +73,10 @@ local function frost(root)
 
             local html_name = html_file.absolute_path
             local dom, msg = html.load_html(html_name)
-            if not dom then return false, msg end
+            if not dom then 
+                log:errorf("No dom for %s (%s). SKIPPING", html_name, msg)
+                break
+            end
         
             -- get all anchors (from \label)
             html_file.labels = html.get_labels(dom)
@@ -127,7 +130,8 @@ local function frost(root)
     needing_publication[#needing_publication + 1] = "metadata.json"
 
     if path.exists("ximera-downloads") then
-        needing_publication[#needing_publication + 1] = "ximera-downloads"
+        -- needing_publication[#needing_publication + 1] = "ximera-downloads"
+        osExecute(" git add -f ximera-dowloads")
     else 
         log:debug("No ximera-downloads folder, and thus no PDF files will be available for download")
     end
@@ -137,21 +141,51 @@ local function frost(root)
     -- local files_string = table.concat(needing_publication,",")
     -- Execute the git add command
 
-    local group_size=10
-    for i = 1, #needing_publication, group_size do
-        -- Print the current group
-        -- log:debug("Group starting at index " .. i .. ":")
-        
-        local  next = table.concat(table.move(needing_publication,i, math.min(i + group_size - 1, #needing_publication),1,{}),' ')
-        local command = "git add -f "  .. next
-        local  exit_code, result = osExecute(command)
+    
 
-        -- Check the result and exit code
-        if exit_code == 0 then
-            log:debug("Files added successfully")
-        else
-            log:error("Error adding files. Exit code "..exit_code..": "..(result or ""))
+-- Recursive function to list all files in a directory
+function list_files(path, files)
+    files = files or {}
+    for file in lfs.dir(path) do
+        -- Skip "." and ".." (current and parent directory)
+        if file ~= "." and file ~= ".." then
+            local full_path = path .. "/" .. file
+            local attr = lfs.attributes(full_path)
+            
+            -- If it's a directory, recurse into it
+            if attr.mode == "directory" then
+                list_files(full_path,files)
+                --table.move(nfiles,1,#nfiles,#files+1,files)
+            else
+                -- If it's a file, print its path
+                -- f:write(full_path.."\n")
+                files[#files+1] = full_path
+             end
         end
+    end
+    return files
+end
+
+local downloads =  list_files("ximera-downloads")
+table.move(downloads, 1, #downloads, #needing_publication + 1, needing_publication)
+
+
+    local f = io.open(".xmgitindexfiles", "w")
+
+    for _, line in ipairs(needing_publication) do
+        log:trace("ADDING "..line)
+        f:write(line .. "\n")
+    end
+    f:close()
+    -- Close the process to flush stdin and complete execution
+    local proc = io.popen("cat .xmgitindexfiles | git update-index --add  --stdin")
+    local output = proc:read("*a")
+    local success, reason, exit_code = proc:close()
+
+    if not success then
+        log:errorf("git update-index fails with %s (%d)",reason, exit_code)
+    else 
+        log:debugf("Added %d files:\n%s", #needing_publication,output)
     end
 
     local _, sourceoid = osExecute("git write-tree")
@@ -171,18 +205,29 @@ local function frost(root)
         log:error("No commitoid returned by git commit-tree")
     end
     log:debug("GOT commit "..(commitoid or ""))
+    
+    if logging.show_level <= logging.levels["trace"] then
+        log:tracef("Committed files for %s:", commitoid)
+        osExecute("git ls-tree -r --name-only "..commitoid)
+    end
 
     local tagName = "publications/"..headid
 
-    log:info("Creating tag "..tagName.." for "..commitoid)
+    result, output = osExecute("git rev-parse "..tagName.." --")
 
-    result, output = osExecute("git tag -l "..tagName)
 
-    if output == tagName
-    then
-        log:status("Tag "..tagName.." already exists")
-        return 0
+    if result then
+        if output == commitoid
+        then
+            log:status("Tag "..tagName.." already exists")
+            return 0
+        else
+            log:infof("Updating tag %s for %s (was %s)", tagName, commitoid, output)
+            result, output = osExecute("git update-ref "..tagName.." "..commitoid)
+            return result, output
+        end
     else
+        log:info("Creating tag "..tagName.." for "..commitoid)
         result, output = osExecute("git tag "..tagName.." "..commitoid)
         if result == 0 then
             log:status("Created "..tagName.." for "..commitoid)
