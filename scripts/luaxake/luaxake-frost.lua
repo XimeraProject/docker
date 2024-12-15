@@ -49,28 +49,38 @@ local function get_output_files(file, extension)
     return result
 end
 
--- Recursive function to list all files in a directory
-function list_files(path, files)
-    files = files or {}
-    for file in lfs.dir(path) do
-        -- Skip "." and ".." (current and parent directory)
-        if file ~= "." and file ~= ".." then
-            local full_path = path .. "/" .. file
-            local attr = lfs.attributes(full_path)
-            
-            -- If it's a directory, recurse into it
-            if attr.mode == "directory" then
-                list_files(full_path,files)
-                --table.move(nfiles,1,#nfiles,#files+1,files)
-            else
-                -- If it's a file, print its path
-                -- f:write(full_path.."\n")
-                files[#files+1] = full_path
-             end
-        end
+local function get_git_uncommitted_files()
+     local ret, out = osExecute("git ls-files --modified --other  --exclude-standard")
+    if ret > 0 then
+        osError("Could not get git info: %s",out)
+        out = "GIT ERROR"
     end
-    return files
+    local utils = require "pl.utils"
+    return utils.split(out,"\n")
 end
+
+-- -- Recursive function to list all files in a directory
+-- function list_files(path, files)
+--     files = files or {}
+--     for file in lfs.dir(path) do
+--         -- Skip "." and ".." (current and parent directory)
+--         if file ~= "." and file ~= ".." then
+--             local full_path = path .. "/" .. file
+--             local attr = lfs.attributes(full_path)
+            
+--             -- If it's a directory, recurse into it
+--             if attr.mode == "directory" then
+--                 list_files(full_path,files)
+--                 --table.move(nfiles,1,#nfiles,#files+1,files)
+--             else
+--                 -- If it's a file, print its path
+--                 -- f:write(full_path.."\n")
+--                 files[#files+1] = full_path
+--              end
+--         end
+--     end
+--     return files
+-- end
     
 
 -- -- Function to find the first table with a given key/value using Penlight
@@ -109,10 +119,20 @@ end
 ---@param file metadata    -- presumably only root-folder really makes sense for 'frosting'
 ---@return boolean status
 ---@return string? msg
-local function frost(root)
+local function frost(tex_files, to_be_compiled_files, root)
     log:debug("frost")
+
+    local uncommitted_files = get_git_uncommitted_files()
+
+    if uncommitted_files then
+        log:warningf("There are %d uncommitted files; serving only to localhost", #uncommitted_files)
+    end
     
-    local tex_files = files.get_tex_files_with_status(root, config.output_formats, config.compilers)
+    if #to_be_compiled_files > 0 then
+        log:warningf("There are %d file to be compiled; serving only to localhost", #to_be_compiled_files)
+    end
+
+    -- local tex_files = files.get_tex_files_with_status(root, config.output_formats, config.compilers)
     -- TODO: warn/error/compile if there are to_be_compiled files ?
 
     local needing_publication = {}
@@ -157,19 +177,19 @@ local function frost(root)
 
             html_file.associated_files = ass_files
 
-            log:info(string.format("Added %4d files for new total of %4d for %s", #ass_files+2,  #needing_publication, html_file.relative_path))
+            log:debug(string.format("Added %4d files for new total of %4d for %s", #ass_files+2,  #needing_publication, html_file.relative_path))
             -- require 'pl.pretty'.dump(to_be_compiled)
 
             -- Store xourses, they have to be added to metadata.json
             if tex_file.tex_type == "xourse" then
-                log:debug("Adding XOURSE "..tex_file.absolute_path.." ("..html_file.title..")")
+                log:info("Adding XOURSE "..tex_file.absolute_path.." ("..html_file.title..")")
                 tex_xourses[html_file.basename] = { title = html_file.title, abstract = html_file.abstract } 
             end
 
         end
     end
 
-    -- TODO: add labels; check/fix use of 'github'
+    -- TODO: check/fix use of 'github'; check use of labels
     local xmmetadata={
         xakeVersion = "2.1.3",
         labels = all_labels,
@@ -288,6 +308,7 @@ local function frost(root)
 
     local ret, output = osExecute("git reset")
 
+    -- TODO: check this, we might be creating too many commits/.. 
     if false and tagtree_oid then
         log:statusf("Updating tag %s for %s (was %s)", tagName, commit_oid, tag_oid)
         result, output = osExecute("git update-ref refs/tags/"..tagName.." "..commit_oid)

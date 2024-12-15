@@ -154,7 +154,7 @@ local function get_labels(activity_dom)
     -- require 'pl.pretty'.dump(anchor)
     local label = anchor:get_attribute("id")
     labels[label] = (labels[label] or 0) + 1
-    log:infof("Found label %s", label )
+    log:debugf("Found label %s", label )
     if labels[label] > 1 then
       log:warning("Duplicate label ",label)
     end 
@@ -309,7 +309,7 @@ local function get_associated_files(dom, file)
   for _, img_el in ipairs(dom:query_selector("img") ) do
     local src = img_el:get_attribute("src")
     src = (file.dir or ".").."/"..src
-    log:info("Found img "..src)
+    log:debug("Found img "..src)
 
     if not path.exists(src) then
       log:error("Image file "..src.." does not exist")

@@ -4,7 +4,6 @@ local error_logparser = require("make4ht-errorlogparser")
 local pl = require "penlight"
 local path = pl.path
 local pldir = pl.dir
-local pltable = require "pl.tablex"
 local plfile = pl.file
 local html = require "luaxake-transform-html"
 local files = require "luaxake-files"      -- for get_metadaa
@@ -57,12 +56,19 @@ local function find_entry(array, key, value)
   return nil  -- Return nil if no match is found
 end
 
--- HACK: these need to be global; TODO: fix!
+--
+-- These next functions are/can be called by post_command in config.commands
+-- HACK: these currently need to be global; TODO: fix!
+--
 function process_html(file)
+  -- simple wrapper to make it work in post_command
+  --
   return html.process(file)
 end
 
 function move_to_downloads(file, cmd_meta, root_dir)
+  -- move the pdf to a corresponding folder under root_dir (presumably ximera-downloads, with different path/name!)
+  --
   local folder = string.format("%s/%s/%s",root_dir, cmd_meta.download_folder, file.dir)
   
   -- require 'pl.pretty'.dump(cmd_meta)
@@ -82,17 +88,21 @@ function move_to_downloads(file, cmd_meta, root_dir)
   return 1, 'NOK'
 end
 
+--
+--
+--
 
---- run a command
+
+--- run a complete compile-cycle on a given file
 --- @param file metadata file on which the command should be run
 --- @param compilers [compiler] list of compilers
 --- @param compile_sequence table sequence of keys from the compilers table to be executed
 --- @return [compile_info] statuses information from the commands
 local function compile(file, compilers, compile_sequence, only_check)
   only_check = only_check or false
-  
   --
-  -- WARNING: (tex-)compilation STARTS IN THE SUBFOLDER !!!
+  -- WARNING: (tex-)compilation HAS TO START IN THE SUBFOLDER !!!
+  --   !!! CHDIR  might confuse all relative paths !!!!
   --
   local current_dir = lfs.currentdir()
   log:tracef("Changing directory to %s (for actual compilations, from %s)",file.absolute_dir,current_dir)
@@ -195,17 +205,6 @@ local function compile(file, compilers, compile_sequence, only_check)
         end
       end
 
-      -- OBSOLETE, see above 
-      -- if command_metadata.process_html then
-      --   log:info("Postprocessing html")
-
-      --   info.html_processing_status, info.html_processing_message = process_html(file)
-      --   if not info.html_processing_status then
-      --     log:error("Error in HTML post processing: " .. (info.html_processing_message or ""))
-      --   end
-      -- end
-
-
       table.insert(statuses, info)
       log:info(string.format("Compilation of %s took %.1f seconds (%.20s)", output_file, compilation_time, file.title))
 
@@ -217,7 +216,6 @@ local function compile(file, compilers, compile_sequence, only_check)
     log:tracef("Ended compilation %s", extension)
     ::endofthiscompilation::
   end
-  ::endofallcompilations::
   lfs.chdir(current_dir)
 
   -- if dump_metadata then

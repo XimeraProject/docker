@@ -245,30 +245,6 @@ config.include_extensions = array_to_set({
 config.dirs = dirs
 
 
--- process commands that do not depend on collecting metadata
-
-if command == "frost" then
-  local root="."     -- frost only for root folder
-  log:status("Start " .. command)
-  local ret, msg = frost.frost(root)  
-  if ret > 0 then
-    log:error("Frost failed:", msg)
-  end
-  os.exit(ret)
-end
-
-if command == "serve" then
-  log:status("Start " .. command)
-  local ret, msg = frost.serve()  
-  if ret > 0 then
-    log:error("Serve failed:", msg)
-  end
-  os.exit(ret)
-  
-  
-end
-
-
 -- collect all metadata / to_be_compiled etc
 
 local tex_files = {}
@@ -302,10 +278,10 @@ for i,nextarg in ipairs(config.dirs) do
 end
 
 log:trace("Finding dependencies, and sorting files accordingly")
-  local to_be_compiled = files.sort_dependencies(tex_files, config.force_compilation)
-  if #to_be_compiled > 1 then
-    log:info(#to_be_compiled.." files need compiling")
-  end
+local to_be_compiled = files.sort_dependencies(tex_files, config.force_compilation)
+if #to_be_compiled > 1 then
+  log:info(#to_be_compiled.." files need compiling")
+end
 
   --
   -- Start processing further commands
@@ -373,8 +349,28 @@ log:trace("Finding dependencies, and sorting files accordingly")
   end
 end
 
+-- process commands that do not depend on collecting metadata
 
-if command == "info" then
+if command == "frost" then
+  log:status("Start " .. command)
+  local ret, msg = frost.frost(tex_files, to_be_compiled)
+  if ret > 0 then
+    log:error("Frost failed:", msg)
+    os.exit(ret)
+  end
+end
+
+if command == "serve" then
+  log:status("Start " .. command)
+  local ret, msg = frost.serve()  
+  if ret > 0 then
+    log:error("Serve failed:", msg)
+    os.exit(ret)
+  end
+end
+
+
+if command == "extrainfo" then
   all_labels = {}
   -- TEST: to be implemented ...?
   for i, file in ipairs(tex_files) do
@@ -388,4 +384,3 @@ if command == "info" then
   require 'pl.pretty'.dump(all_labels)
 
 end
-
