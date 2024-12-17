@@ -435,8 +435,11 @@ local function process(file)
 
   -- Not needed here ...???
   -- local ass_files = get_associated_files(dom, html_file)
-  
+  if string.match(html_name,".make4ht.") then
+    html_name = html_name:gsub(".make4ht","")  
+  end 
 
+  log:infof("Adapted html being saved as %s", html_name )
   return save_html(dom, html_name) 
 end
 
