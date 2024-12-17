@@ -31,7 +31,7 @@ local function osExecute(cmd)
     local commandOutput = assert(fileHandle:read('*a'))
     local returnCode = fileHandle:close() and 0 or 1
     commandOutput = string.gsub(commandOutput, "\n$", "")
-    if returnCode > 0then
+    if returnCode > 0 then
         log:warningf("Command %s returns %d: %s", cmd, returnCode, commandOutput)
     end
     log:trace("returns "..returnCode..": "..commandOutput..".")

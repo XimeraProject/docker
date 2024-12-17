@@ -13,14 +13,14 @@ local log = logging.new("compile")
 
 
 
---- fill command template with file information
---- @param file metadata file on which the command should be run
---- @param command string command template
---- @return string command 
-local function prepare_command(file, command_template)
-  -- replace placeholders like @{filename} with the corresponding keys from the metadata table
-  return command_template:gsub("@{(.-)}", file)
-end
+-- --- fill command template with file information
+-- --- @param file metadata file on which the command should be run
+-- --- @param command string command template
+-- --- @return string command 
+-- local function prepare_command(file, command_template)
+--   -- replace placeholders like @{filename} with the corresponding keys from the metadata table
+--   return command_template:gsub("@{(.-)}", file)
+-- end
 
 
 local function test_log_file(filename)
@@ -50,6 +50,7 @@ end
 local function find_entry(array, key, value)
   for _, entry in ipairs(array) do
       if entry[key] == value then
+
           return entry  -- Return the first matching entry
       end
   end
@@ -74,6 +75,11 @@ function move_to_downloads(file, cmd_meta, root_dir)
   -- require 'pl.pretty'.dump(cmd_meta)
   -- require 'pl.pretty'.dump(file)
   local src = find_entry(file.output_files, "extensionlong", cmd_meta.extension)
+
+  if not src or src == ""  then
+    log:errorf("No extensionlong = %s found for %s",cmd_meta.extension, file.relative_path)
+    require 'pl.pretty'.dump(file)
+  end
   -- local src = file.output_files[1].absolute_path    -- TODO: fix
   
   local tgt = string.format("%s/%s.%s", folder, file.basename, src.extension)
@@ -94,6 +100,9 @@ end
 
 
 --- run a complete compile-cycle on a given file
+--- 
+--- SIDE-EFFECT: adds output_files to the file argiument !!!
+--- 
 --- @param file metadata file on which the command should be run
 --- @param compilers [compiler] list of compilers
 --- @param compile_sequence table sequence of keys from the compilers table to be executed
@@ -109,7 +118,6 @@ local function compile(file, compilers, compile_sequence, only_check)
   lfs.chdir(file.absolute_dir)
 
   local statuses = {}
-  local FAIL = false
 
   -- Start ALL compilations for this file, in the correct order; stop as soon as one fails...
   -- NOTE: extension is a bad name, it's rather  'compiler'
@@ -120,12 +128,16 @@ local function compile(file, compilers, compile_sequence, only_check)
       log:errorf("No compiler defined for %s (%s); SKIPPING",extension,file.relative_path)
       goto endofthiscompilation  -- nice: a goto-statement !!!
     end
+    if file.extension ~= "tex" then
+      log:errorf("Can't compile non-tex file %s; SKIPPING, SHOULD PROBABLY NOT HAVE HAPPENED",file.relative_path)
+      goto endofthiscompilation  -- nice: a goto-statement !!!
+    end
 
     local output_file = file.filename:gsub("tex$", extension)
 
     -- sometimes compiler wants to check for the output file (like for sagetex.sage),
     if command_metadata.check_file and not path.exists(output_file) then
-      log:debugf("Skipping compilation because file %s does not exist",output_file)
+      log:debugf("Skipping compilation because 'check_file' and file %s does not exist",output_file)
       goto endofthiscompilation  -- nice: a goto-statement !!!
     end
     
@@ -134,14 +146,23 @@ local function compile(file, compilers, compile_sequence, only_check)
     --   goto endofthiscompilation  -- nice: a goto-statement !!!
     -- end
 
-      local command_template = command_metadata.command
+    
+      -- NOT NEEDED ???
+      -- local command_template = command_metadata.command
       -- we need to make a copy of file metadata to insert some additional fields without modification of the original
       -- log:debug("Command " .. command_template)
-      local tpl_table = copy_table(file)
-      tpl_table.output_file = output_file
-      tpl_table.make4ht_extraoptions = config.make4ht_extraoptions
-      tpl_table.make4ht_mode = config.make4ht_mode
-      local command = prepare_command(tpl_table, command_template)
+      -- local tpl_table = copy_table(file)
+      -- tpl_table.output_file = output_file
+      -- tpl_table.make4ht_extraoptions = config.make4ht_extraoptions
+      -- tpl_table.make4ht_mode = config.make4ht_mode
+      -- local command = prepare_command(tpl_table, command_template)
+
+      -- replace placeholders like @{filename} with the corresponding keys from the metadata table
+      file.output_file = output_file    -- for potential substitution as @{output_file} in command:
+      local command = command_metadata.command:gsub("@{(.-)}", file)
+            command = command:gsub("@{(.-)}", config)
+      file.output_file = nil
+
       local start_time =  socket.gettime()
       local compilation_time = 0
       local status = 0
@@ -151,21 +172,21 @@ local function compile(file, compilers, compile_sequence, only_check)
         log:info("Running in check-modus: SKIPPING " .. command )
       else
         log:info("Running " .. command )
-      -- we reuse this file from make4ht's mkutils.lua
-      local f = io.popen(command, "r")
-      output = f:read("*all")
-      -- rc will contain return codes of the executed command
-      local rc =  {f:close()}
-      -- the status code is on the third position 
-      -- https://stackoverflow.com/a/14031974/2467963
-      status = rc[3]
-      local end_time = socket.gettime()
-      compilation_time = end_time - start_time
+        -- we reuse this file from make4ht's mkutils.lua
+        local f = io.popen(command, "r")
+        output = f:read("*all")
+        -- rc will contain return codes of the executed command
+        local rc =  {f:close()}
+        -- the status code is on the third position 
+        -- https://stackoverflow.com/a/14031974/2467963
+        status = rc[3]
+        local end_time = socket.gettime()
+        compilation_time = end_time - start_time
 
-      if status ~= command_metadata.status then
-        -- error will be handled and logged further down!
-        log:errorf("Compilation failed: returns %d (and not %d) after %3f seconds", status, command_metadata.status,compilation_time)
-      end
+        if status ~= command_metadata.status then
+          -- error will be handled and properly logged further down!
+          log:errorf("Compilation of %s for %s failed: returns %d (not %d) after %3f seconds", extension, file.relative_path, status, command_metadata.status,compilation_time)
+        end
       end
 
 
@@ -175,20 +196,26 @@ local function compile(file, compilers, compile_sequence, only_check)
       --- @field output string stdout from the command
       --- @field status number status code returned by command
       --- @field errors? table errors detected in the log file
-      --- @field html_processing_status? boolean did HTML processing run without errors?
-      --- @field html_processing_message? string possible error message from HTML post-processing
-      local info = {
+      --- @field post_status? boolean did HTML processing run without errors?
+      --- @field post_message? string possible error message from HTML post-processing
+      local compile_info = {
         output_file = output_file,
-        command = command,
-        output = output,
-        status = status
+        command     = command,
+        output      = output,
+        status      = status
       }
       if command_metadata.check_log then
-        info.errors = test_log_file(file.basename .. ".log")
+        compile_info.errors = test_log_file(file.basename .. ".log")  -- gets errors the make4ht-way !
+        for _, err in ipairs(compile_info.errors) do
+          log:errorf("%-20s: %s [[%s]]", err.filename or "?", err.error, err.context)
+        end
       end
 
+    if status == command_metadata.status then
+
       -- store outputfiles with metadata
-      local ofile = files.get_metadata(output_file)
+      -- log:infof("ADDING METADATA FOR %s : %s (from %s)",current_dir, output_file, file.absolute_dir)
+      local ofile = files.get_metadata(file.absolute_dir, output_file)
 
       log:debug("Adding outputfile "..ofile.relative_path.. " to "..file.relative_path)
       -- require 'pl.pretty'.dump(ofile)
@@ -199,17 +226,27 @@ local function compile(file, compilers, compile_sequence, only_check)
         local cmd = command_metadata.post_command
         log:infof("Postprocessing: %s", cmd)
 
-        info.post_status, info.post_message = _G[cmd](file, command_metadata, current_dir)     -- lua way of calling the function whose name is in 'cmd'
-        if not info.post_status then
-          log:error("Error in HTML post processing: " .. info.post_message)
+        -- call the post_command
+        compile_info.post_status, compile_info.post_message = _G[cmd](file, command_metadata, current_dir)     -- lua way of calling the function whose name is in 'cmd'
+        
+        if not compile_info.post_status then
+          log:error("Error in HTML post processing: " .. compile_info.post_message)
         end
       end
 
-      table.insert(statuses, info)
+    else
+        if path.exists(output_file) then
+          -- prevent  trailing non-correct files, as they prevent automatic re-compilation !
+          log:debugf("Moving failed output file to %s",output_file..".failed")
+          pl.file.move(output_file,output_file..".failed")
+        end
+    end
+      table.insert(statuses, compile_info)
+
       log:info(string.format("Compilation of %s took %.1f seconds (%.20s)", output_file, compilation_time, file.title))
 
       if status == command_metadata.fatal_status then
-        log:warning("Skipping further compilations for %s after error",relative_file)
+        log:warning("Skipping further compilations for %s after error",file.relative_file)
         break   -- STOP FURTHER COMPILATION
       end
     --end

@@ -82,21 +82,25 @@ end
 --- get absolute and relative file path, as well as other file metadata
 --- @param file string retrieved file
 --- @return metadata
-local function get_metadata(relative_path, entry)
+local function get_metadata(relpath, entry)
   local dir
   -- Some hocus pocus to make get_metadata work as
   --    get_metadata(filename_with_path) 
   -- or get_metadata(dir, filename)   (where the path is explicitly split ...)
   -- 202412: only the filename_with_path syntax should work fine ?
   if not entry then
-    dir, entry = path.splitpath(relative_path)
+    dir, entry = path.splitpath(relpath)
   else 
-    dir = relative_path
-    relative_path = string.format("%s/%s",dir,entry)
+    dir = relpath
+    relpath = string.format("%s/%s",dir,entry)
   end
   dir = dir or ""
 
-  log:tracef("Getting metadata for file %s (in %s)", entry, dir)
+  local relative_path = path.normpath(relpath)     -- resolve potential ../ parts
+  dir, entry = path.splitpath(relative_path)
+
+
+  log:tracef("Getting metadata for file %s (from %s and %s)", relative_path, entry, dir)
   -- We have dir, entry and relative path to fill lot's of variations/combinations...
   -- needs_compilation is updated later
 
@@ -150,6 +154,7 @@ end
 local function get_files(dir, files)
   dir = dir:gsub("/$", "")    -- remove potential trailing '/'
   files = files or {}
+  local initial_nfiles = #files
   for entry in path.dir(dir) do
     if not ignore_entry(entry) then
       local metadata = get_metadata(dir, entry)
@@ -161,7 +166,7 @@ local function get_files(dir, files)
       end
     end
   end
-  log:debugf("get_files returns %d files", #files)
+  log:debugf("get_files returns %4d files in %s", #files - initial_nfiles, dir)
   return files
 end
 
@@ -241,18 +246,29 @@ end
 
 --- Detect if the output file needs recompilation
 ---@param tex metadata metadata of the main TeX file to be compiled
----@param html metadata metadata of the output file
+---@param outfile metadata metadata of the output file
 ---@return boolean
-local function is_up_to_date(tex, html)
+local function needs_compiling(tex, outfile)
   -- if the output file doesn't exist, it needs recompilation
-  log:tracef("Is %s uptodate? %s",html.relative_path, html.exists and "It exists" or "It doesn't exist")
-  if not html.exists then return true end
+  log:tracef("Does %s need compilation? %s",outfile.relative_path, outfile.exists and "It exists" or "It doesn't exist")
+  if not outfile.exists then return true end
   -- test if the output file is older if the main file or any dependency
-  local status = tex.modified > html.modified
-  for _,subfile in ipairs(tex.dependecies or {}) do
-    -- log:tracef("Check modified of %s", subfile.relative_path)
-    status = status or subfile.modified > html.modified
+  local status = tex.modified > outfile.modified
+  if status then 
+    log:tracef("TeX file %s has changed since compilation of %s",tex.relative_path, outfile.relative_path)
   end
+  for _,subfile in ipairs(tex.dependecies or {}) do
+    --  log:tracef("Check modified of subfile %s", subfile.relative_path)
+    if not subfile or not subfile.relative_path or not subfile.modified then
+        log:warning("Incomplete data for dependency of %s",tex.relative_path)
+        pl.pretty.dump(subfile)
+    end
+    if subfile.modified > outfile.modified then
+      log:tracef("Dependent file %s has changed since compilation of %s",subfile.relative_path,  outfile.relative_path)
+      status = status or subfile.modified > outfile.modified
+    end
+  end
+  log:tracef("%s %s", outfile.relative_path, status and "needs compilation" or "does not need compilation")
   return status
 end
 
@@ -263,6 +279,9 @@ local function get_tex_dependencies(metadata)
   local filename    = metadata.absolute_path
   local current_dir = metadata.absolute_dir
   local dependecies = config.default_dependencies     --- XXX
+  local dependecies = {}
+  table.move(config.default_dependencies, 1, #(config.default_dependencies), 1, dependecies)
+  -- local dependecies = {}
   local f = io.open(filename, "r")
   if f then
     local content = f:read("*a")
@@ -277,7 +296,7 @@ local function get_tex_dependencies(metadata)
           metadata = get_metadata(current_dir, argument .. ".tex")
         end
         if metadata and metadata.exists then
-          log:debug("File "..filename," depends on "..metadata.absolute_path)
+          log:debugf("File "..filename," depends on "..metadata.absolute_path)
           dependecies[#dependecies+1] = metadata
         else
           log:warningf("No metadata found for %s/%s; not added to dependencies.", current_dir, argument)
@@ -285,6 +304,7 @@ local function get_tex_dependencies(metadata)
       end
     end
   end
+  log:debugf("tex_dependencies found %d dependencies for %s", #dependecies, filename)
   return dependecies
 end
 
@@ -299,9 +319,9 @@ local function check_output_files(metadata, extensions, compilers)
   local tex_file = metadata.filename
   local needs_compilation = false
   for _, extension in ipairs(extensions) do
-    local html_file = get_metadata(metadata.dir, tex_file:gsub("tex$", extension))
+    local html_file = get_metadata(metadata.absolute_dir, tex_file:gsub("tex$", extension))
     -- detect if the HTML file needs recompilation
-    local status = is_up_to_date(metadata, html_file)
+    local status = needs_compiling(metadata, html_file)
     -- for some extensions (like sagetex.sage), we need to check if the output file exists 
     -- and stop the compilation if it doesn't
     local compiler = compilers[extension] or {}
@@ -342,7 +362,7 @@ local function sort_dependencies(tex_files, force_compilation)
   local to_be_compiled = {}
   -- first add all used files
   for _, metadata in ipairs(tex_files) do
-    log:tracef("Consider %s", metadata.filename)
+    log:tracef("Consider %s", metadata.absolute_path)
 
     if force_compilation or metadata.needs_compilation then
       Graph:add_edge("root", metadata.absolute_path)
@@ -359,6 +379,7 @@ local function sort_dependencies(tex_files, force_compilation)
       log:tracef("Get child = %s",name)
       -- add edge only to files added in the first run, because only these needs compilation
       if used[name] then
+        log:tracef("Added edge %s  - %s", current_name, name)
         Graph:add_edge(current_name, name)
       end
     end
@@ -387,6 +408,7 @@ end
 --- @param dir string root directory where we should find TeX files
 --- @return metadata[] tex_files list of all TeX files found in the directory tree
 local function get_tex_files_with_status(dir, output_formats, compilers)
+  log:debugf("Getting tex files in %s (for %s and %s)", dir, table.concat(output_formats,', '), table.concat(compilers,', '))
   local files = get_files(dir)
   local tex_files = filter_main_tex_files(get_tex_files(files))
   -- now check which output files needs a compilation
