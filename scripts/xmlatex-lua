@@ -535,6 +535,13 @@ elif [[ "$COMMAND" == "name" ]]
 then
     echo "Starting name (from bash script...)"
     xake_name
+elif [[ "$COMMAND" == "all" ]]
+then
+    echo "Starting all"
+    shift
+    $LUAXAKE bake $*
+    $LUAXAKE frost $*
+    $LUAXAKE serve $*
 else
     $LUAXAKE $*
 fi
