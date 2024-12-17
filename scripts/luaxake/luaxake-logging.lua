@@ -71,6 +71,7 @@ function logging.print_msg(header, message, color)
   local output= string.format(color_format, padded_header, message)
   print(output)
   if logging.outfile then
+    local output= string.format("%s%s", padded_header, message)  -- no color !
     local fp = io.open(logging.outfile, "a")
     local str = string.format("%s: %s\n", os.date(logging.dateformat), output)
     fp:write(str)
