@@ -244,7 +244,7 @@ local function frost(tex_files, to_be_compiled_files, root)
     -- local downloads =  list_files("ximera-downloads")
     -- table.move(downloads, 1, #downloads, #needing_publication + 1, needing_publication)
 
-
+if false then
     local f = io.open(".xmgitindexfiles", "w")
 
     for _, line in ipairs(needing_publication) do
@@ -262,6 +262,13 @@ local function frost(tex_files, to_be_compiled_files, root)
     else 
         log:debugf("Added %d files (%s)", #needing_publication,output)
     end
+
+else    
+    for _, line in ipairs(needing_publication) do
+        log:trace("ADDING "..line)
+        osExecute("git add -f "..line)
+    end
+end
 
 
     local _, new_tree = osExecute("git write-tree")
@@ -327,7 +334,6 @@ local function frost(tex_files, to_be_compiled_files, root)
         -- end
     end
     return ret, output
-    -- never reach here ...
 end
 
 local function serve()
@@ -347,11 +353,11 @@ local function serve()
     log:infof("Publishing  %s  (tree:%s tag:%s) ", tagName, tree_oid, tag_oid)
     
     osExecute("git push -f ximera "..tagName)
-    local res, output osExecute("git push -f ximera "..tag_oid..":refs/heads/master")     -- HACK ???
+    osExecute("git push -f ximera "..tag_oid..":refs/heads/master")     -- HACK ???
     
     log:statusf("Published  %s", tagName)
 
-    return res, output
+    return 0,'OK'
 end
 
 M.get_output_files      = get_output_files
