@@ -296,9 +296,14 @@ local function frost(tex_files, to_be_compiled_files, root)
         return 0, 'OK'
     end
     
-    
+    -- -- Give a dummy account to push/commit if none is available
+    -- ret, output = osExecute("git config  --get user.name  || { echo Setting git user.name;  git config --local user.name  'xmlatex Xake'; }")
+    -- ret, output = osExecute("git config  --get user.email || { echo Setting git user.email; git config --local user.email 'xmlatex@xakecontainer'; }")
 
     local ret, commit_oid = osExecute("git commit-tree -m "..publication_branch.." -p "..publication_oid.." "..new_tree)
+    if ret > 0 then
+        return ret, commit_oid   -- this is the errormessage in this case!
+    end
     log:debug("GOT commit "..(commit_oid or ""))
     
     if logging.show_level <= logging.levels["trace"] then
@@ -311,18 +316,17 @@ local function frost(tex_files, to_be_compiled_files, root)
     -- TODO: check this, we might be creating too many commits/.. 
     if false and tagtree_oid then
         log:statusf("Updating tag %s for %s (was %s)", tagName, commit_oid, tag_oid)
-        result, output = osExecute("git update-ref refs/tags/"..tagName.." "..commit_oid)
-        return result, output
+        ret, output = osExecute("git update-ref refs/tags/"..tagName.." "..commit_oid)
     else
         --local tagName = "publications/"..os.date("%Y%m%d_%H%M%S")
         local tagName = "publications/"..commit_oid
         log:statusf("Creating tag %s for %s", tagName, commit_oid)
         ret, output = osExecute("git tag "..tagName.." "..commit_oid)
-        if ret > 0 then
-            log:errorf("Created tag %s for %s: %s", tagName, commit_oid, output)
-        end
-        return result, output
+        -- if ret > 0 then
+        --     log:errorf("Created tag %s for %s: %s", tagName, commit_oid, output)
+        -- end
     end
+    return ret, output
     -- never reach here ...
 end
 
@@ -343,11 +347,11 @@ local function serve()
     log:infof("Publishing  %s  (tree:%s tag:%s) ", tagName, tree_oid, tag_oid)
     
     osExecute("git push -f ximera "..tagName)
-    osExecute("git push -f ximera "..tag_oid..":refs/heads/master")     -- HACK ???
+    local res, output osExecute("git push -f ximera "..tag_oid..":refs/heads/master")     -- HACK ???
     
     log:statusf("Published  %s", tagName)
 
-    return 0,'OK'
+    return res, output
 end
 
 M.get_output_files      = get_output_files

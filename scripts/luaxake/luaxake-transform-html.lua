@@ -48,11 +48,11 @@ end
 local function find_html_file(file)
   -- file metadata passed to the process function are for the TeX file 
   -- we need to find metadata for the output HTML file
-  log:debug("find html for "..file.filename)
+  log:trace("find_html_file for "..file.filename)
   for _, output in ipairs(file.output_files) do
     -- log:debug("Checking for 'html': "..(output.metadata.filename or "") )
     if output.extension == "html" then
-      log:debug("Returning: "..(output.filename or ""))
+      log:trace("Returning: "..(output.filename or ""))
       -- require 'pl.pretty'.dump(output)
       return output
     end
@@ -70,11 +70,11 @@ local html_cache = {}
 local function load_html(filename)
   -- cache DOM objects
   if html_cache[filename] then 
-    log:debug("returning cached dom ")
+    log:trace("returning cached dom ")
     -- require 'pl.pretty'.dump(domobject.html_parse(content))
     return html_cache[filename]
   else
-    log:debug("Loading html for "..filename)
+    log:debug("Loading and parsing html for "..filename)
     local f = io.open(filename, "r")
     if not f then return nil, "Cannot open HTML file: " .. (filename or "") end
     -- log:debug("Opened html for "..filename)
@@ -82,7 +82,7 @@ local function load_html(filename)
     f:close()
     -- log:debug("Dumping html for "..filename..": "..content)
     html_cache[filename] = domobject.html_parse(content)
-    log:debug("returning non-cached dom ")
+    log:trace("returning non-cached dom ")
     return domobject.html_parse(content)
   end
 end
@@ -140,7 +140,7 @@ local function read_title_and_abstract(activity_dom)
   local title, abstract
   local title_el = activity_dom:query_selector("title")[1]
   if title_el then title = title_el:get_text() end
-  log:debug("title ", title)
+  log:debug("Read title ", title)
   local abstract_el = activity_dom:query_selector("div.abstract")[1]
   if abstract_el then
     return title, abstract_el:get_text()
@@ -154,7 +154,7 @@ local function get_labels(activity_dom)
     -- require 'pl.pretty'.dump(anchor)
     local label = anchor:get_attribute("id")
     labels[label] = (labels[label] or 0) + 1
-    log:debugf("Found label %s", label )
+    log:tracef("Found label %s", label )
     if labels[label] > 1 then
       log:warning("Duplicate label ",label)
     end 
@@ -169,7 +169,7 @@ end
 local function transform_xourse(dom, file)
   for _, activity in ipairs(dom:query_selector("a.activity")) do
     local href = activity:get_attribute("href")
-    log:debug("activity", href)
+    log:trace("activity", href)
     if href then
         -- some activity links don't have links to HTML files
         -- remove the optional '.tex'

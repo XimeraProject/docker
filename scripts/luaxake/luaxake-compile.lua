@@ -272,7 +272,7 @@ local function print_errors(statuses)
     if #errors > 0 then
       log:error("Errors from " .. status.command .. ":")
       for _, err in ipairs(errors) do
-        log:error(string.format("%20s line %d: %s", err.filename or "?", err.line or "?", err.error))
+        log:error("%20s line %s: %s", err.filename or "?", err.line or "?", err.error)
         log:error(err.context)
       end
     end
