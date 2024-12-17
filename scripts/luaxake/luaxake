@@ -22,6 +22,7 @@ local frost   = require "luaxake-frost"
 local html    = require "luaxake-transform-html"
 
 
+-- TODO: fix syntax with [command dirs]: should be 1 obligatory, then many optional args 
 local option_text = [[ 
 Luaxake: build system for Ximera documents
 Usage: 
@@ -36,7 +37,16 @@ Options:
 -C,--compile   (default none)        Compile sequence (default 'pdf,html', or as set in settings)
 --check                              Check, no cleaning/compiling
 --config       (default ximera.cfg)  TeX4ht config file
-]]
+
+
+Possible commands:
+ bake
+ name               -- NOT YET IMPLEMENTED HERE: see xmlatex !!!
+ frost
+ serve
+ clean / veryclean  -- to be changed/improved
+ info               -- not yet very useful..
+ ]]
 
 -- REMOVED: <dir>  (table)                 Document root directory
 --- @class args
@@ -71,7 +81,7 @@ log:debug("command: "..command)
 local dirs = {}
 
 for i, value in ipairs(args) do
-    log:debug("Adding file/dir "..value)
+    log:trace("Args: adding file/dir "..value)
     table.insert(dirs, value)
 end
 
@@ -80,38 +90,44 @@ if #dirs == 0 then
   dirs = {"."}
 end
 
+--
+-- FOR REFERENCE:   (and to be checked ...?)
+--
+
 --- @class DOM_Object 
 --- Dummy type declaration for LuaXML DOM object, to prevent error messages from language server
 --- @field query_selector function get all elements that match a given CSS selector
---- @field get_children function 
---- @field get_text function 
---- @field get_attribute function
---- @field remove_node function
+--- @field get_children   function 
+--- @field get_text       function 
+--- @field get_attribute  function
+--- @field remove_node    function
 
 --- @class compiler 
---- @field command string command template
---- @field check_log? boolean should we check the log file for errors?
---- @field check_file? boolean execute command only if the output file exists
---- @field status? number expected status code from the command
+--- @field command       string  command template
+--- @field check_log?    boolean should we check the log file for errors?
+--- @field check_file?   boolean execute command only if the output file exists
+--- @field status?       number  expected status code from the command
 --- @field process_html? boolean run HTML post-processing
 
 --- @class config
---- @field output_formats [string] list of output format extensions
---- @field documentclass_lines number on how many lines in TeX files we should try to look for \documentclass
---- @field compilers {string: compiler}
---- @field compile_sequence [string] sequence  of compiler names to be executed
---- @field clean [string] list of extensions of temp files to be removed after the compilation
---- @field config_file string TeX4ht config file 
+--- @field output_formats      [string] list of output format extensions
+--- @field documentclass_lines number   on how many lines in TeX files we should try to look for \documentclass
+--- @field compilers           {string: compiler}
+--- @field compile_sequence    [string] sequence  of compiler names to be executed
+--- @field clean               [string] list of extensions of temp files to be removed after the compilation
+--- @field config_file         string   TeX4ht config file 
 
 config = {
   -- list of outputs ( and extensions )
-  output_formats = {"html", "pdf", "handout.pdf"},
-  compile_sequence = {"pdf", "html", "handout.pdf"},
-  --   default_dependencies = { "xmPreamble.tex" },     -- add here e.g. xmPreamble, ximera.cls, ...
+  output_formats = {"make4ht.html", "pdf", "handout.pdf"},
+  -- output_formats = {"html", "pdf", "sagetex.sage"},    -- TODO: check/implement sage
+  compile_sequence = {"pdf", "make4ht.html", "handout.pdf"},
   -- compile_sequence = {"pdf", "sagetex.sage", "pdf", "html"},
+  -- see infra --   default_dependencies = { "xmPreamble.tex" },     -- add here e.g. xmPreamble, ximera.cls, ...
   compilers = {
+    -- just a dummy test: create .ddd files that contain the date ..
     ddd = {
-      command = 'date >@{basename}.ddd',     -- mmm, this increases the .jax file !!!
+      command = 'date >@{basename}.ddd',     
       status = 0, -- check that the latex command return 0
     },
     pdf = {
@@ -119,10 +135,10 @@ config = {
       -- command = 'pdflatex -interaction=nonstopmode  -file-line-error -shell-escape  "\\PassOptionsToClass{tikzexport}{ximera}\\PassOptionsToClass{xake}{ximera}\\PassOptionsToClass{xake}{xourse}\\nonstopmode\\input{@{filename}}"',
       -- command = 'pdflatex -interaction=nonstopmode  -file-line-error -shell-escape  "\\PassOptionsToClass{xake}{ximera}\\PassOptionsToClass{xake}{xourse}\\input{@{filename}}"',
       command = 'pdflatex -interaction=nonstopmode  -file-line-error -shell-escape  "\\input{@{filename}}"',     -- mmm, this increases the .jax file !!!
-      check_log = true, -- check log
-      status = 0, -- check that the latex command return 0
-      infix = "" ,
-      extension = "pdf",
+      check_log = true,     -- check log
+      status = 0,           -- check that the latex command return 0
+      infix = "" ,          -- used for .handout, and .make4k4
+      extension = "pdf",    -- not used ????
       post_command = 'move_to_downloads',
       download_folder = 'ximera-downloads/with-answers',
     },
@@ -135,6 +151,7 @@ config = {
       post_command = 'move_to_downloads',
       download_folder = 'ximera-downloads/handouts',
     },
+    -- 20241217: use make4ht.html !
     html = {
       -- command = "make4ht -f html5+dvisvgm_hashes -c @{config_file} -sm draft @{filename}",
       -- command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes -s @{make4ht_mode} -a debug @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
@@ -146,6 +163,16 @@ config = {
       extension = "html",
       infix = "make4ht" ,
     },
+    ["make4ht.html"] = {
+      command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes          -j @{basename}.make4ht -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
+      check_log = true, -- check log
+      status = 0, -- check that the latex command return 0
+      process_html = false,
+      post_command = 'process_html',
+      extension = "html",
+      infix = "make4ht" ,
+    },
+    -- do not use, only for testing
     ["draft.html"] = {
       command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes -m draft -j @{basename}.make4ht -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       check_log = true, -- check log
@@ -154,6 +181,7 @@ config = {
       extension = "html",
       infix = "make4ht" ,
     },
+    -- sage not tested/implemented !!!!
     ["sagetex.sage"] = {
       command = "sage @{output_file}",
       check_log = true, -- check log
@@ -174,6 +202,8 @@ config = {
     practicechapter=true, 
     practicesection=true, 
   }, 
+  -- automatically clean files immediately after each compilation
+  -- the commented extensions might cause issues when automatically clean, to be verified
   clean = {
     -- "aux",
     "4ct",
@@ -199,7 +229,6 @@ config = {
   },
   -- make4ht_loglevel = "",
   make4ht_extraoptions= "",
-  -- output_formats = {"html", "pdf", "sagetex.sage"},    -- TODO: check/implement sage
   -- number of lines in tex files where we should look for \documentclass
   documentclass_lines = 30,
 }
@@ -234,20 +263,20 @@ end
 
 config.check = args.check
 
-local function array_to_set(array)
-  local set = {}
-  for _, v in ipairs(array) do
-      set[v] = true
-  end
-  return set
-end
+-- local function array_to_set(array)
+--   local set = {}
+--   for _, v in ipairs(array) do
+--       set[v] = true
+--   end
+--   return set
+-- end
 
-config.include_extensions = array_to_set({
-  "tex",
-  "html",
-  "sty",
-  "pdf",
-})
+-- config.include_extensions = array_to_set({
+--   "tex",
+--   "html",
+--   "sty",
+--   "pdf",
+-- })
 
 
 config.dirs = dirs
@@ -256,19 +285,19 @@ config.dirs = dirs
 -- collect all metadata / to_be_compiled etc
 
 local tex_files = {}
+
 for i,nextarg in ipairs(config.dirs) do 
 
   log:info("Processing argument " .. nextarg)
 
   local more_tex_files = {}
   
-  -- an existing TeX-file, but without the extension
-  if not path.isfile(nextarg) and path.isfile(nextarg..".tex" ) then    
-    log:trace("Adding .tex extension to file "..nextarg)
-    nextarg = nextarg..".tex"
-  end
   if path.isdir(nextarg) then
     more_tex_files = files.get_tex_files_with_status(nextarg, config.output_formats, config.compilers)
+  -- an existing TeX-file, but without the extension
+  elseif not path.isfile(nextarg) and path.isfile(nextarg..".tex" ) then    
+    log:trace("Adding .tex extension to file "..nextarg)
+    nextarg = nextarg..".tex"
   elseif    ( path.isfile(nextarg) and nextarg:match("%.tex$") ~= nil   )     -- an existing TeX-file
   then
     local metadata = files.get_metadata(nextarg)
@@ -286,7 +315,7 @@ for i,nextarg in ipairs(config.dirs) do
 end
 
 
-log:infof("Finding dependencies, and sorting files for %d tex_files", #tex_files)
+log:debugf("Finding dependencies, and sorting files for %d tex_files", #tex_files)
 local to_be_compiled = files.sort_dependencies(tex_files, config.force_compilation)
 if #to_be_compiled > 0 then
   log:status(#to_be_compiled.." files need compiling")
@@ -294,7 +323,6 @@ else
   log:status("No files need compiling")
 end
 
--- os.exit(1)
   --
   -- Start processing further commands
   --
