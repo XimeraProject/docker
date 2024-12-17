@@ -5,9 +5,12 @@
 #
 # Usage: 
 #   xmlatex bake
-#   xmlatex compile test/myximerafile.tex
-#   xmlatex serve     # this will also run 'xake frost'
-#   xmlatex -i bash   # gets a bash-shell INSIDE the container
+#   xmlatex bake test/myximerafile.tex
+#   xmlatex bash   # gets a bash-shell INSIDE the container
+#   xmlatex frost
+#   xmlatex serve
+#   xmlatex name
+#   xmlatex all    # runs bake / frost / serve
 #
 # Advanced usage
 #   XAKE_IMAGE=ghcr.io/ximeraproject/xake2023:latest xmlatex compile demo.tex    # use a different docker image
@@ -87,7 +90,14 @@ else
         shift 
     fi 
 
+    # make the -i default for bash (finally ...)
+    if [[ "$1" == "bash" ]]
+    then
+        INTERACTIVE="-it"  # start an interactive docker session (i.e. with a terminal attached)
+    fi 
+
     # LOCAL_IP is only needed if you want to serve to a ximeraServer on your localhost; do NOT use XIMERA_URL when using LOCAL_IP
+    # TODO: is it still needed at all ????   The hostname -I confuses MacOS !
     if [[ "$LOCAL_IP" == "" ]]
     then
         LOCAL_IP=$(set -- $(hostname -I); echo "$1")
@@ -109,7 +119,13 @@ else
 fi
 
 # We're for sure running in a container now
-# We'll start using more advanced bash/linuix functionality, because we're (presumable...) in the known context of a properly configured container image.
+# We'll start using more advanced bash/linux functionality, because we're (presumable...) in the known context of a properly configured container image.
+
+# We'll try to get everything done by luaxake (and not (the old) xake)
+# This very script can hopefully become obsolete soon
+# TODO:
+#  -> processing of options./config/settings in lua (ie what is in config.txt)
+#  -> implement 'xake name' in lua (is now still in bash, in this script)
 
 echo "Starting $0 $*"
 
@@ -232,14 +248,16 @@ while getopts ":hitvds" opt; do
 
         Publishes to $XIMERA_URL$XIMERA_NAME 
 
-	This script is a (docker-)wrapper to 'xake', and contains some extra convenience-functions for building pdf's.
+	This script is a (docker-)wrapper to 'luaxake', and contains some extra convenience-functions for building pdf's.
 	
 	Usage:
-        xmlatex compile path/to/file.tex
-        xmlatex compilePdf path/to/file.tex
-        xmlatex bake
-        xmlatex serve     (does ALSO do frost and setup gpg-keys ...!)
-        xmlatex -i bash   (start a shell inside the container)
+        xmlatex bake path/to/file.tex
+        xmlatex bake -l debug --compile pdf,html path/to/file.tex
+        xmlatex clean
+        xmlatex name
+        xmlatex frost
+        xmlatex serve 
+        xmlatex bash   (start a shell inside the container)
 	   
 EOF
        exit 0
@@ -268,8 +286,6 @@ COMMAND=$1
 
 debug "COMMAND=$COMMAND"
 
-
-
 # After git clone, ALL files seem recent; try to reset them (to prevent baking all files all the time)
 #  (needed in gitlab CI/CD ...)
 reset_file_times() {
@@ -290,143 +306,8 @@ reset_file_times() {
  fi
 }
 
-if [[ "$COMMAND" == "bash" ]]
-then
-    # interactive shell (option -i needed when starting the container !)
-    shift  #  remove "bash"
-    declare -p >.xmvariables.txt
-    ${XAKE%xake} /bin/bash --rcfile <(cat .xmvariables.txt)  $*
-    rm -f .xmvariables.txt
-
-elif [[ "$COMMAND" == "bake" || "$COMMAND" == "all" ]]
-then
-    # files with beamer are IGNORED by bake and bakePdf   (should only be compiled to pdf, not html)
-    #  do it 'by hand' here
-    shift   # remove 'bake'
-    reset_file_times
-    mkdir -p ximera-downloads
-    echo "Copying gif files ..."
-    [[ -f pictures/*.gif ]] && cp pictures/*.gif ximera-downloads
-    echo "Compiling beamer and _pdf.tex files ..."
-        find \( -name "*beamer*.tex" -o -name "*_pdf.tex" \) -printf '%P\n' | while read file; do
-	    ls -al ${file%tex}{tex,pdf,svg,log}
-        if [[ "$file" -nt "${file/%.tex/.pdf}" ]]
-        then
-             echo "Compiling $file   (beamer)"
-             $LUAXAKE compilePdf $file
-             echo "Copying $file to ximera-downloads"
-             cp ${file/%.tex/.pdf} ximera-downloads
-             echo "Converting $file to svg"
-             pdf2svg ${file/%.tex/.pdf} ${file/%.tex/.svg}
-        else
-             echo "File $file uptodate"
-        fi
-    done
-    echo "Baking other files ..."
-    # $XAKE --jobs $NB_JOBS bake      # Generate html files
-    $LUAXAKE bake $*     # Generate html files
-elif [[ "$COMMAND" == "cleanstandaard" ]]
-then
-    NAME=standaard
-    rm -rf ximera-downloads/"$NAME"_pdf
-    find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} sh -c 'echo "Removing $1"; rm "$1"' -- {} "$NAME" # remove .pdf's
-elif [[ "$COMMAND" == "cleanhandout" ]]
-then
-    NAME=handout
-    rm -rf ximera-downloads/"$NAME"_pdf
-    find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} sh -c 'echo "Removing $1"; rm "$1"' -- {} "$NAME" # remove .pdf's
-elif [[ "$COMMAND" == "bakestandaard" ]]
-then
-    NAME=standaard
-    reset_file_times
-    $XAKE --jobs $NB_JOBS bakePdf "$NAME" 
-    find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} dirname ximera-downloads/"$NAME"_pdf/{} | xargs mkdir -p # create necessairy folders
-    find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} sh -c 'echo "Move $1 to ximera-downloads"; cp "$1" ximera-downloads/"$2"_pdf/"${1%-*}.pdf" || (echo "Failed moving" && exit 1)' -- {} "$NAME" # Copy to ximera-downloads
-elif [[ "$COMMAND" == "bakehandout" ]]
-then
-    NAME=handout
-    # files with _pdf are IGNORED by bake and bakePdf   (should only be complied to pdf, not html)
-    #  do it 'by hand' here Needed to create the handouts including formularia
-    reset_file_times
-    mkdir -p ximera-downloads
-    echo "Compiling _pdf.tex files ..."
-        find \( -name "*_pdf.tex" \) -printf '%P\n' | while read file; do
-	ls -al ${file%tex}{tex,pdf,log}
-        if [[ "$file" -nt "${file/%.tex/.pdf}" ]]
-        then
-             echo "Compiling $file   (beamer)"
-             $XAKE compilePdf $file
-             cp ${file/%.tex/.pdf} ximera-downloads
-             cp ${file/%.tex/.pdf} ${file/%_pdf.tex/-handout_pdf.pdf}
-        else
-             echo "File $file   uptodate (beamer)"
-        fi
-    done
-    timeout 50m $XAKE --jobs $NB_JOBS bakePdf "$NAME" "\\PassOptionsToClass{handout}{ximera}\\PassOptionsToClass{handout}{xourse}"
-    echo "Moving pdfs to ximera-downloads"
-    find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} dirname ximera-downloads/"$NAME"_pdf/{} | xargs mkdir -p # create necessairy folders
-   #find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} sh -c 'echo "Move $1 to ximera-downloads"; cp "$1" ximera-downloads/"$2"_pdf/"${1%-*}.pdf" || (echo "Failed moving" && exit 1)' -- {} "$NAME" # Copy to ximera-downloads
-    find -name "*-$NAME.pdf" -printf '%P\n' | xargs -I{} sh -c 'cp "$1" ximera-downloads/"$2"_pdf/"${1%-*}.pdf" || (echo "Failed moving" && exit 1)' -- {} "$NAME" # Copy to ximera-downloads
-
-elif [[ "$COMMAND" == "bakebeamer" ]]
-then
-    # files with beamer are IGNORED by bake ansd bakePdf   (should only be complied to pdf, not html)
-    #  do it 'by hand' here
-    NAME=handout
-    reset_file_times
-    echo "Compiling beamer files ..."
-    find -name "*beamer*.tex" -printf '%P\n' |grep -v preamble | grep -v handout | while read file; do
-	ls -al ${file%tex}{tex,pdf,log}
-        if [[ "$file" -nt "${file/%.tex/.pdf}" ]]
-        then
-            echo "Compiling $file   (beamer)"
-            $XAKE compilePdf $file
-            $XAKE compilePdf $file  $NAME "\\PassOptionsToClass{handout}{beamer}"
-        else
-            echo "File $file   uptodate (beamer)"
-        fi
-        mkdir -p public
-        basename=$(basename $file)
-        cp ${file/%.tex/.pdf} public/${basename/%.tex/.pdf}
-        cp ${file/%.tex/-handout.pdf} public/${basename/%.tex/-handout.pdf}
-        mkdir -p $(dirname ximera-downloads/"$NAME"_pdf/$file})
-        cp ${file/%.tex/.pdf} ximera-downloads/${NAME}_pdf/${file/%.tex/.pdf}
-        cp ${file/%.tex/-handout.pdf} ximera-downloads/${NAME}_pdf/${file/%.tex/-handout.pdf}
-    done
-    echo "Compiling _pdf files ..."
-    find -name "*_pdf.tex" -printf '%P\n' | while read file; do
-	ls -al ${file%tex}{tex,pdf,log}
-        #if [[ "$file" -nt "${file/%.tex/.pdf}" ]]
-        #then
-            echo "Compiling $file   (_pdf)"
-            $XAKE compilePdf $file
-        #else
-        #    echo "File $file   uptodate (_pdf)"
-        #fi
-        mkdir -p public
-        basename=$(basename $file)
-        cp ${file/%.tex/.pdf} public/${basename/%.tex/.pdf}
-        mkdir -p $(dirname ximera-downloads/"$NAME"_pdf/$file})
-        cp ${file/%.tex/.pdf} ximera-downloads/${NAME}_pdf/${file/%.tex/.pdf}
-    done
-fi
-if [[ "$COMMAND" == "all" || "$COMMAND" == "frost" ]] 
-then
-        debug "Frosting ..."
-
-        [[ -n "$XM_FROST_WITH_UNCOMMITTED_CHANGES" ]] && FROST="Frost"
-
-
-        # set git name and email if not yet set (e.g. in vanilla docker container)
-        git config  --get user.name  >/dev/null || { echo Setting git user.name; git config user.name "xmlatex Xake"; }
-        git config  --get user.email >/dev/null || git config user.email "xmlatex@xakecontainer"
-
-
-        $LUAXAKE  frost .  || error "Could not frost"  
- 
-fi
-if [[ "$COMMAND" == "serve" || "$COMMAND" == "all" ]]
-then
+xake_name() {
+    # TODO: migrate to lua ...?
     echo "Doing xake $COMMAND"
 
 
@@ -488,7 +369,7 @@ then
     if [[ "$XIMERA_URL" =~ http://localhost ]]
     then
         # On localhost, don't care too much about consistency/security 
-        debug "Serving to  http://localhost..."
+        debug "Serving to  http://localhost...($XIMERA_URL)"
         export XM_PUSH_FORCE=1
         export XM_FROST_WITH_UNCOMMITTED_CHANGES=1
         export XM_PUBLISH_WITH_DUMMY_KEY=1
@@ -530,6 +411,7 @@ debug "Got $TOKEN"
 type hashcash >/dev/null || error "Executable 'hashcash' not available"
 type jq       >/dev/null || error "Executable 'jq' not available"
 
+debug "Getting Temp key from  ${XIMERA_URL}$XIMERA_NAME.git"
 HASHCASH=$(hashcash -b 20 -qm $XIMERA_NAME.git)
 LKEYS=$(curl -s --data brol -H "X-Hashcash: $HASHCASH" -H "Authorization: Bearer $TOKEN" ${XIMERA_URL}$XIMERA_NAME.git)
 # openssl rand -hex 48 | gpg -e -a --always-trust --recipient 215FC33FAB44D5CCA31A04B2CC78CB561FDC49A8  | gpg --decrypt
@@ -580,78 +462,17 @@ git config --local --add http.$XIMERA_URL.extraHeader "Authorization: Bearer $TO
 git config  --get user.name  || { echo Setting git user.name; git config user.name "xmlatex Xake"; }
 git config  --get user.email || git config user.email "xmlatex@xakecontainer"
 
-HEAD_OID=$(git rev-parse HEAD)
-
-TAG="publications/$HEAD_OID"
-
-echo "TAG=$TAG"
+}
 
 
-if ! git show-ref $TAG
+if [[ "$COMMAND" == "bash" ]]
 then
-    error "No tag: need frost"
-    # git add ximera-downloads
-    # git tag -m 'xake committed' $TAG $HEAD_OID
-fi
-
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
-
-debug "BRANCH=$BRANCH"
-
-echo "Pushing new publication to ximera server"
-
-# debug "git push ximera $BRANCH:master"
-# git push ximera $BRANCH:master
-
-    # HACK to OVERWRITE an already published revision
-    # This option obviously should either be added to 'xake serve', or the whole git pushing should be taken out of 'xake serve' and moved here
-    if [[ -n "$XM_PUSH_FORCE" ]]
-    then
-    #    REV=$(git rev-parse HEAD)
-       echo "git push -f ximera $TAG (FORCING PUSH)"
-             git push -f ximera $TAG
-             git push -f ximera $BRANCH:master
-    else
-        debug "git push ximera $TAG"
-               git push ximera $TAG
-               git push ximera $BRANCH:master
-    fi
-
-#    echo "Prepare git repo"
-#    git fetch --unshallow # Zorg ervoor dat we de hele geschiedenis hebben ipv enkel een deel, anders werkt het serven niet
-#   .git config core.fileMode false
-#    git branch -D master || true    #ignore error
-#    git checkout -B master # doe alsof we op master zitten
-
-    # echo "Doing xake serve"
-    # $XAKE serve  2>&1    # Upload files = push tag
-
-
-
-    # Check if the file exists
-    if [ ! -d ".git" ]; then
-        error "Folder '.git' not found."
-    fi
-
-## Use following line to skip the reset-git-fileowner-hack (e.g. in config.txt)
-# export  XM_NO_RESET_GIT_FILEOWNER=1
-    if [[ -z "$XM_NO_RESET_GIT_FILEOWNER" ]]
-    then
-    # HACK: try to restore ownership of git files (might be set to root after git push in container ...)
-    # Get the owner and group of .git
-    owner_group=$(stat -c "%u:%g" ".git")
-
-    if [[ "$owner_group" != "0:0" ]]
-    then
-        # Change the ownership of all files in the current directory
-        echo "Changing ownership of all files in .git to $owner_group."
-        chown -R "$owner_group" .git
-    fi
-
-    fi  # end reset-git-fileowner
-
-    debug "End of xake serve"
-
+    # interactive shell
+    shift  #  remove "bash"
+    /bin/bash $*
+    # declare -p >.xmvariables.txt
+    # ${XAKE%xake} /bin/bash --rcfile <(cat .xmvariables.txt)  $*
+    # rm -f .xmvariables.txt
 elif [[ "$COMMAND" == "updateDevEnv" ]]
 then
     echo "Doing xake $COMMAND"
@@ -678,8 +499,8 @@ then
     tar -xzvf "$DEVENV_TGZFILE"
 
 
-## Use following line to skip the reset-git-fileowner-hack (e.g. in config.txt)
-# export  XM_NO_RESET_GIT_FILEOWNER=1
+    ## Use following line to skip the reset-git-fileowner-hack (e.g. in config.txt)
+    # export  XM_NO_RESET_GIT_FILEOWNER=1
     if [[ -z "$XM_NO_RESET_GIT_FILEOWNER" ]]
     then
     # HACK: try to restore ownership of git files (might be set to root after git push in container ...)
@@ -710,16 +531,11 @@ then
     shift
     echo "Starting $*"
     $*
-elif [[ "$COMMAND" == "luaxake" ]]
+elif [[ "$COMMAND" == "name" ]]
 then
-    # Use $LUAXAKE to fix thre path (cfr supra)
-    shift
-    echo "Starting $LUAXAKE $*"
+    echo "Starting name (from bash script...)"
+    xake_name
+else
     $LUAXAKE $*
-# else
-#     # Use $LUAXAKE to fix thre path (cfr supra)
-#     echo "(default) Starting $LUAXAKE $*"
-#     $LUAXAKE $*
 fi
 
-#exit 0; % would ignore (some) errors; might be relevant in CI/CD context
