@@ -343,7 +343,7 @@ local function serve()
     log:infof("Publishing  %s  (tree:%s tag:%s) ", tagName, tree_oid, tag_oid)
     
     osExecute("git push -f ximera "..tagName)
-    osExecute("git push -f ximera "..tag_oid..":master")
+    osExecute("git push -f ximera "..tag_oid..":refs/heads/master")     -- HACK ???
     
     log:statusf("Published  %s", tagName)
 
