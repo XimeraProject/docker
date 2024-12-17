@@ -196,6 +196,7 @@ local function transform_xourse(dom, file)
         if not activity_dom then
           log:error(msg)
         else
+
           local title, abstract = read_title_and_abstract(activity_dom)
           -- add titles and abstracts from linked activity HTML
           -- local parent = activity:get_parent()
@@ -398,12 +399,38 @@ local function process(file)
   remove_empty_paragraphs(dom)
   add_dependencies(dom, file)
 
+
   local title, abstract = read_title_and_abstract(dom)
   file.title = title or ""
   file.abstract = abstract or ""
   
   if is_xourse(dom, html_file) then
     transform_xourse(dom, file)
+
+    
+  log:debug("Checking if a 'part' is present") 
+  local part = dom:query_selector(".card.part")
+
+  if #part == 0 then
+    log:debug("No parts: add one") 
+    
+    local body = dom:query_selector("body")[1]
+    local first_activity = dom:query_selector(".card.activity")[1]
+    if first_activity then
+      log:info("Adding default card of type 'part' (HACK: needed by current preview server)") 
+      local h1 = body:create_element("h1")
+      local h1_text = h1:create_text_node("Main Part")
+      h1:add_child_node(h1_text)
+      h1:set_attribute("class", "card part")
+      body:add_child_node(h1,6)    -- the 3 is a guess  
+    else
+      log:debug("No 'activity' card found ??? ") 
+    end
+  end
+
+  --<h1 class='card part' id='part1'>The First Topic of This Course</h1>
+
+
   end
 
   -- Not needed here ...???
