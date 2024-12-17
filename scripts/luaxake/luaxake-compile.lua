@@ -133,7 +133,12 @@ local function compile(file, compilers, compile_sequence, only_check)
       goto endofthiscompilation  -- nice: a goto-statement !!!
     end
 
+     local infix = ""
+    if command_metadata.infix and command_metadata.infix ~= "" then
+      infix = command_metadata.infix.."."
+    end
     local output_file = file.filename:gsub("tex$", extension)
+    local log_file    = file.filename:gsub("tex$", infix.."log")
 
     -- sometimes compiler wants to check for the output file (like for sagetex.sage),
     if command_metadata.check_file and not path.exists(output_file) then
@@ -205,7 +210,7 @@ local function compile(file, compilers, compile_sequence, only_check)
         status      = status
       }
       if command_metadata.check_log then
-        compile_info.errors = test_log_file(file.basename .. ".log")  -- gets errors the make4ht-way !
+        compile_info.errors = test_log_file(log_file)  -- gets errors the make4ht-way !
         for _, err in ipairs(compile_info.errors) do
           log:errorf("%-20s: %s [[%s]]", err.filename or "?", err.error, err.context)
         end
@@ -272,7 +277,7 @@ local function print_errors(statuses)
     if #errors > 0 then
       log:error("Errors from " .. status.command .. ":")
       for _, err in ipairs(errors) do
-        log:error("%20s line %s: %s", err.filename or "?", err.line or "?", err.error)
+        log:errorf("%20s line %s: %s", err.filename or "?", err.line or "?", err.error)
         log:error(err.context)
       end
     end
