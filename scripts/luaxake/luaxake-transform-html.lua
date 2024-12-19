@@ -400,6 +400,42 @@ local function process(file)
   add_dependencies(dom, file)
 
 
+  log:debug("Check if .jax file is present") 
+  local jax_file = html_name:gsub(".html$", ".xmjax")
+  if not path.exists(jax_file) then
+    log:warning("Strange: no JAX file with extra LaTeX commands for MathJAX")
+    jax_file = nil
+  end
+
+  if jax_file then
+
+      local preambles = dom:query_selector("div.preamble")
+      
+    if #preambles == 0 then
+      -- Should not happen ...
+      log:error("No div.preamble in html : please add one") 
+    end
+
+    local preamble = preambles[1]
+    local scrpt = preamble:create_element("script")
+    scrpt:set_attribute("type", "math/tex")
+    
+    
+    local f = io.open(jax_file, "r")
+    local cmds = f:read("*a")
+    f:close()
+    local filtered_cmds= cmds:gsub("[^\n]*[:*@].-\n", "")
+    
+    local _, n_cmds = cmds:gsub("\n","")
+    local _, n_filtered_cmds = filtered_cmds:gsub("\n","")
+
+    log:debugf("Adding %d newcommands (%d filtered)",n_filtered_cmds,n_cmds - n_filtered_cmds) 
+    local scrpt_text = scrpt:create_text_node(filtered_cmds)
+    scrpt:add_child_node(scrpt_text)
+    preamble:add_child_node(scrpt)
+
+  end
+
   local title, abstract = read_title_and_abstract(dom)
   file.title = title or ""
   file.abstract = abstract or ""
@@ -433,10 +469,11 @@ local function process(file)
 
   end
 
-  -- Not needed here ...???
-  -- local ass_files = get_associated_files(dom, html_file)
   if string.match(html_name,".make4ht.") then
-    html_name = html_name:gsub(".make4ht","")  
+    html_name = html_name:gsub(".make4ht","")
+  end 
+  if string.match(html_name,".draft.") then
+    html_name = html_name:gsub(".draft","")
   end 
 
   log:infof("Adapted html being saved as %s", html_name )
