@@ -539,9 +539,13 @@ elif [[ "$COMMAND" == "all" ]]
 then
     echo "Starting all"
     shift
-    $LUAXAKE bake $*
-    $LUAXAKE frost $*
-    $LUAXAKE serve $*
+    $LUAXAKE bake  $* || error "Exiting..." 
+
+    
+    git remote show ximera 2>/dev/null || xake_name
+
+    $LUAXAKE frost $* || error "Exiting..."
+    $LUAXAKE serve $* || error "Exiting..."
 else
     $LUAXAKE $*
 fi
