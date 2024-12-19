@@ -174,12 +174,12 @@ config = {
     },
     -- do not use, only for testing
     ["draft.html"] = {
-      command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes -m draft -j @{basename}.make4ht -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
+      command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes -m draft -j @{basename}.draft -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
-      -- post_command = 'process_html',
+      post_command = 'process_html',
       extension = "html",
-      infix = "make4ht" ,
+      infix = "draft" ,
     },
     -- sage not tested/implemented !!!!
     ["sagetex.sage"] = {
@@ -331,6 +331,8 @@ end
     log:info("Got tex files:")
     for _,file in ipairs(tex_files) do
         print(file.relative_path)
+
+
     end
   end
 
@@ -359,6 +361,15 @@ end
   -- TODO: fix commands (cfr xmlatex/xmlatex/lua)
   if command == "bake" or command == "compilePdf" or command ==  "compile" then
     log:status("Start "..command)
+
+    if command == "compilePdf" then
+      log:info("Compile only PDF")
+      config.compile_sequence = { "pdf" }
+    end
+    if command == "compile" then
+      log:info("Compile only HTML")
+      config.compile_sequence = { "draft.html" }
+    end
 
     local all_statuses = {}
     if #to_be_compiled == 0 then

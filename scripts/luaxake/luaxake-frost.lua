@@ -42,8 +42,24 @@ local function get_output_files(file, extension)
     local result = {}
     for _, entry in ipairs(file.output_files) do
         if entry.extension == extension then --and entry.info.type == targetType then
-            table.insert(result, entry)
-            log:debug(string.format("Adding %-4s outputfile: %s ", entry.extension, entry.absolute_path))
+            if extension == "make4ht.html" then
+                local file = files.get_metadata(entry.reldir, entry.basenameshort..".html")
+                -- require 'pl.pretty'.dump(entry)
+                -- require 'pl.pretty'.dump(file)
+                table.insert(result, file)
+                log:debug(string.format("Hacking %-4s outputfile: %s ", file.extension, file.absolute_path))
+            elseif extension == "draft.html" then
+                local file = files.get_metadata(entry.reldir, entry.basenameshort..".html")
+                -- require 'pl.pretty'.dump(entry)
+                -- require 'pl.pretty'.dump(file)
+                table.insert(result, file)
+                log:debug(string.format("Hacking %-4s outputfile: %s ", file.extension, file.absolute_path))
+            else
+                table.insert(result, entry)
+                log:debug(string.format("Adding %-4s outputfile: %s ", entry.extension, entry.absolute_path))
+            end
+        else
+            log:tracef("Skipping %-4s outputfile: %s ", entry.extension, entry.absolute_path)
         end
     end
     return result
@@ -142,7 +158,7 @@ local function frost(tex_files, to_be_compiled_files, root)
         log:debug("Output for "..tex_file.absolute_path)
         needing_publication[#needing_publication + 1] = tex_file.relative_path
 
-        local html_files = get_output_files(tex_file, "html")
+        local html_files = get_output_files(tex_file, "make4ht.html")
         
         for i,html_file in ipairs(html_files) do
         -- require 'pl.pretty'.dump(html_file)
