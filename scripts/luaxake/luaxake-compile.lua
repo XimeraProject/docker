@@ -196,7 +196,9 @@ local function compile(file, compilers, compile_sequence, only_check)
 
 
       --- @class compile_info
+      --- @field source_file string source file name
       --- @field output_file string output file name
+      --- @field log_file string logging file name
       --- @field command string executed command
       --- @field output string stdout from the command
       --- @field status number status code returned by command
@@ -204,15 +206,19 @@ local function compile(file, compilers, compile_sequence, only_check)
       --- @field post_status? boolean did HTML processing run without errors?
       --- @field post_message? string possible error message from HTML post-processing
       local compile_info = {
+        source_file = file.relative_path,
         output_file = output_file,
+        log_file    = log_file,
+        compiler    = extension,
         command     = command,
         output      = output,
         status      = status
       }
       if command_metadata.check_log then
         compile_info.errors = test_log_file(log_file)  -- gets errors the make4ht-way !
+
         for _, err in ipairs(compile_info.errors) do
-          log:errorf("%-20s: %s [[%s]]", err.filename or "?", err.error, err.context)
+          log:errorf("%-20s: %s [[%s]]", log_file, err.error, err.context)
         end
       end
 
@@ -242,19 +248,21 @@ local function compile(file, compilers, compile_sequence, only_check)
     else
         if path.exists(output_file) then
           -- prevent  trailing non-correct files, as they prevent automatic re-compilation !
-          log:debugf("Moving failed output file to %s",output_file..".failed")
+          log:infof("Moving failed output file to %s",output_file..".failed")
           pl.file.move(output_file,output_file..".failed")
         end
     end
+
       table.insert(statuses, compile_info)
 
       log:info(string.format("Compilation of %s took %.1f seconds (%.20s)", output_file, compilation_time, file.title))
 
-      if status == command_metadata.fatal_status then
-        log:warning("Skipping further compilations for %s after error",file.relative_file)
-        break   -- STOP FURTHER COMPILATION
-      end
-    --end
+      -- -- NOT IMPLEMENTED ...
+      -- if status == command_metadata.fatal_status then
+      --   log:warning("Skipping further compilations for %s after error",file.relative_file)
+      --   break   -- STOP FURTHER COMPILATION
+      -- end
+
     log:tracef("Ended compilation %s", extension)
     ::endofthiscompilation::
   end
@@ -277,7 +285,7 @@ local function print_errors(statuses)
     if #errors > 0 then
       log:error("Errors from " .. status.command .. ":")
       for _, err in ipairs(errors) do
-        log:errorf("%20s line %s: %s", err.filename or "?", err.line or "?", err.error)
+        log:errorf("%20s line %s: %s", status.source_file or "?", err.line or "?", err.error)
         log:error(err.context)
       end
     end

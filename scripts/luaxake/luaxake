@@ -339,6 +339,12 @@ end
   if command == "clean" or command == "veryclean" then
     local n_files_deleted = 0
     local to_be_cleaned_extensions = tablex.copy(config.clean)
+
+    if args.compile ~= "none" then
+      tablex.insertvalues(to_be_cleaned_extensions, utils.split(args.compile,','))   -- append arrays ...
+      log:info("Appending extra extension(s) to be cleaned " .. args.compile)
+    end
+    
     if command == "veryclean" then
       log:debug("Appending extra extensions")
       tablex.insertvalues(to_be_cleaned_extensions, config.output_formats)   -- append arrays ...
@@ -376,39 +382,45 @@ end
       log:status("Nothing to be baked")
     else
     for i, file in ipairs(to_be_compiled) do
-      log:status(string.format("Compiling file %3d/%d: %s", i, #to_be_compiled, file.absolute_path))
+      log:statusf("Compiling file %3d/%d: %s", i, #to_be_compiled, file.absolute_path)
 
       local statuses = compile.compile(file, config.compilers, config.compile_sequence, config.check)
+
       table.insert(all_statuses,statuses)
 
+      -- Already now print the error(s); a summary should be reapeated at the end
       compile.print_errors(statuses)
       compile.clean(file, config.clean)
     end
 
-    -- filter errors out all statuses
-    local errors = {}
+    log:statusf("All compilations finished")
+
+
+    -- print all errors 
+    local failed_files = {}
     for _, entry in ipairs(all_statuses) do 
-      for _, info in ipairs(entry) do
-        log:debug("File "..(info.output_file or "UNKNOWN??") .." got status " .. (info.status or 'NIL??') )
-        -- require 'pl.pretty'.dump(info)
-      
-        if (info.status or 0) > 0 then 
-          table.insert(errors, info) 
-          -- errors is a list-per-compile-instance of a table with command/errors (with filename/line/error/context) and (FULL!!!) output )
+      for _, compile_info in ipairs(entry) do
+        log:debug("File "..(compile_info.output_file or "UNKNOWN??") .." got status " .. (compile_info.status or 'NIL??') )
+        
+        if (compile_info.status or 0) > 0 then 
+--          require 'pl.pretty'.dump(compile_info)
+            failed_files[compile_info.log_file] = #(compile_info.errors)
+
+            for _, err in ipairs(compile_info.errors) do
+              log:errorf("[%10s] %s:%s %s [%s]", compile_info.compiler, compile_info.source_file, err.line, err.context,err.error)
+  --            require 'pl.pretty'.dump(err)
+            end
         end 
       end
     end
 
-    if #errors == 0 then
-      log:info("Baked "..#to_be_compiled.." files without finding errors")      
+    if tablex.size(failed_files) == 0 then
+      log:infof("Baked %d files without finding errors", #to_be_compiled)
     else
-      log:errorf("Baking failed with %d error%s detected", #errors, #errors == 1 and "" or "s")
+      log:errorf("Baking %d failed with %d compilation%s failed", #to_be_compiled, tablex.size(failed_files), tablex.size(failed_files) == 1 and "" or "s")
 
-      for _, errorinstance in ipairs(errors) do
-          for _, err in ipairs(errorinstance.errors) do
-            -- require 'pl.pretty'.dump(err)
-            log:errorf("Summary: %s: %s [%s]", err.filename, err.context,err.error)
-          end
+      for filename, errs in pairs(failed_files) do
+            log:errorf("See logfile %s for %d errors", filename, errs)
       end
       os.exit(1)
     end
