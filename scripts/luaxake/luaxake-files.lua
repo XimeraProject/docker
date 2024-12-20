@@ -286,25 +286,29 @@ local function get_tex_dependencies(metadata)
   if f then
     local content = f:read("*a")
     f:close()
+    -- remove all comments
+    content = content:gsub("([^\\])%%.-\n", "%1\n")
     -- loop over all LaTeX commands with arguments
     for command, argument in content:gmatch("\\(%w+)%s*{([^%}]+)}") do
       -- add dependency if the current command is \input like
       if config.input_commands[command] then
         local metadata = get_metadata(current_dir, argument)
-        if not metadata or not metadata.exists then
+        if not argument:match(".tex$") and ( not metadata or not metadata.exists ) then
           -- the .tex extension may be missing, so try to read it again
-          metadata = get_metadata(current_dir, argument .. ".tex")
+          argument = argument .. ".tex"
+          metadata = get_metadata(current_dir, argument)
         end
         if metadata and metadata.exists then
-          log:debugf("File "..filename," depends on "..metadata.absolute_path)
+          log:debugf("File %s depends on %s", filename, metadata.absolute_path)
           dependecies[#dependecies+1] = metadata
         else
-          log:warningf("No metadata found for %s/%s; not added to dependencies.", current_dir, argument)
+          log:warningf("%s: No metadata found for %s/%s; not added to dependencies.", filename, current_dir, argument)
         end
       end
     end
   end
   log:debugf("tex_dependencies found %d dependencies for %s", #dependecies, filename)
+  --log:tracef("%s has dependencies %s", filename, table.concat(dependecies,', '))
   return dependecies
 end
 
