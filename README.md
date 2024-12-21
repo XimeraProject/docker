@@ -1,36 +1,23 @@
-# Docker files for Ximera
+# Dockerfiles and docker images for Ximera
 
-In this repository you will find files needed to *build* Docker images for Ximera. 
+In this repository contains files needed to *build* Docker images for Ximera. 
 
-Typically Ximera-authors will *use* existing Docker images, e.g. as found via
+Typical Ximera-authors are not concerned with the contents of this repo, as they will not *build* Docker images, but only *use* existing images, e.g 
 
-`docker pull ghcr.io/ximeraproject/xake2019:v2.1.1`   # with a recent xake version that e.g. also compiles Pdf's
+`docker pull ghcr.io/ximeraproject/xake2024:v2.4.2`
 
+`docker pull ghcr.io/ximeraproject/xake2024:v2.4.2-full`   # the same as above, but with a *full* TeXLive, and thus (much) bigger
 
-`docker pull ghcr.io/ximeraproject/xake2019:latest`   # from the 'official' ximera-repo's, built with xake/Dockerfile2019
+The xake2024 images contain TeXLive and some supporting scripts and tools for compiling Ximera courses. In particular they contain a recent version of the `ximera` LaTeX package, and xmlatex en (lua-)xake tools needed to publish webversions of Ximera courses. Generating PDF versions can be done with 'pdflatex' in any recent TeX distribution. 
 
-`docker pull ghcr.io/ximeraproject/xake2023:latest`  # with texlive2023, but still has some issues  (desmos, no begin{align}, ...)
+See the ximeraFirstSteps repo to get started with these images.
 
+# Development
 
-To publish your repo to a ximera-server with the `xmlatex` script as provided in e.g. the ximeraFirstSteps repo, you need to generate a personal GPG key,
-and put it in a .ximeraserve file  (example in ximeraFirstSteps)
+A new tag vX.xx automatically creates new xake2024:vX.xx, xake2024:vX.xx-medium and xake2024:vAxx-full images, that can be found on https://github.com/orgs/XimeraProject/packages. See ximeraFirstSteps for currently used/usable versions.
 
-Alternatively or additionally, you can overwrite that and export the key to a file, e.g. `gpgkey`, and export following environment variables:
-  
-`export GPG_KEY=gpgkey`
+# Planning
 
-`export GPG_KEY_ID=[the (hash-) ID for your key]`
+A v2.5 version of xake is being prepared, completely re-written in lua (and no longer in GO as the previous version). The lua-xake code is in this repo, and the old 'xake' repo is no longer used.
 
-`export REPO_XIMERA=[the (xake) name under which to publish te content]`
-
-`export URL_XIMERA=https://ximera.osu.edu/`
-
-In particular (or even more alternatively),
-
-`REPO_XIMERA=mytest ./scripts/xmlatex serve`
-
-would then publish to the URL https://ximera.osu.edu/mytest.
-
-This procedure might change in the future.
-
-
+The folder 'server' contains a prototype Dockerfile for a ximeraServer, but no 'official' versions exist currently.
