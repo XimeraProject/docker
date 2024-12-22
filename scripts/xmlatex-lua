@@ -473,6 +473,29 @@ then
     # declare -p >.xmvariables.txt
     # ${XAKE%xake} /bin/bash --rcfile <(cat .xmvariables.txt)  $*
     # rm -f .xmvariables.txt
+elif [[ "$COMMAND" == "copySettingsLocal" ]]
+then
+    echo "Doing xake $COMMAND"
+    if [[  -d ".ximera" ]]
+    then 
+        echo "Please first (re)move the current .ximera folder"
+    else
+        mkdir .ximera
+        echo "Copying ximeraLatex from docker image into .ximera folder"
+        cp  -r  /root/texmf/tex/latex/ximeraLatex/*  .ximera
+    fi
+    
+    if [[  -d ".texmf/luaxake" ]]
+    then 
+        echo "Please first (re)move the current .texmf/luaxake folder"
+    else
+        mkdir -p .texmf/luaxake
+        echo "Copying luaxake from docker image into .texmf/luaxake folder"
+        cp  -r  /root/texmf/tex/latex/luaxake/*  .texmf/luaxake
+    fi
+    echo "Copying xmlatex from docker image into xmScripts/xmlatex.current"
+    cp  /usr/local/bin/xmlatex  ./xmScripts/xmlatex.current
+
 elif [[ "$COMMAND" == "updateDevEnv" ]]
 then
     echo "Doing xake $COMMAND"
@@ -543,6 +566,16 @@ then
 
     
     git remote show ximera 2>/dev/null || xake_name
+
+    $LUAXAKE frost $* || error "Exiting..."
+    $LUAXAKE serve $* || error "Exiting..."
+elif [[ "$COMMAND" == "Serve" ]]
+then
+    echo "Starting all"
+    shift
+    
+    # git remote show ximera 2>/dev/null || xake_name
+    xake_name
 
     $LUAXAKE frost $* || error "Exiting..."
     $LUAXAKE serve $* || error "Exiting..."
