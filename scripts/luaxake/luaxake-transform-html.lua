@@ -195,6 +195,11 @@ end
 
 local function get_labels(activity_dom)
   local labels = {}
+
+  if not activity_dom then
+    log:warning("Passed nil to get_labels...? No labels returned.")
+    return {}
+  end
   for i, anchor in ipairs(activity_dom:query_selector("a.ximera-label")) do
     -- require 'pl.pretty'.dump(anchor)
     local label = anchor:get_attribute("id")
@@ -343,6 +348,12 @@ end
 local function get_associated_files(dom, file)
   log:debug("get_associated_files for "..file.filename)
   -- pl.pretty.dump(file)
+
+  if not dom then
+    log:warning("Passed nil to get_associated files for %s...? No files returned.", file.filename or "<NO__FILE>")
+    return {}
+  end
+
   local ass_files = {}
   local isXimeraFile = dom:query_selector("meta[name='ximera']")[1]
   if not isXimeraFile then 

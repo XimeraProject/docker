@@ -168,7 +168,7 @@ local function frost(tex_files, to_be_compiled_files, root)
 
             local html_name = html_file.absolute_path
             local dom, msg = html.load_html(html_name)
-            if not dom then 
+            if not dom and not ( tex_file.relative_path:match("_pdf.tex") or tex_file.relative_path:match("_beamer.tex")  ) then 
                 log:errorf("No dom for %s (%s). SKIPPING", html_name, msg)
                 break
             end

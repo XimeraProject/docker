@@ -101,7 +101,7 @@ end
 
 --- run a complete compile-cycle on a given file
 --- 
---- SIDE-EFFECT: adds output_files to the file argiument !!!
+--- SIDE-EFFECT: adds output_files to the file argument !!!
 --- 
 --- @param file metadata file on which the command should be run
 --- @param compilers [compiler] list of compilers
@@ -130,8 +130,14 @@ local function compile(file, compilers, compile_sequence, only_check)
     end
     if file.extension ~= "tex" then
       log:errorf("Can't compile non-tex file %s; SKIPPING, SHOULD PROBABLY NOT HAVE HAPPENED",file.relative_path)
-      goto endofthiscompilation  -- nice: a goto-statement !!!
+      goto endofthiscompilation 
     end
+    
+    if extension:match("html$") and ( file.relative_path:match("_pdf.tex$") or file.relative_path:match("_beamer.tex$") ) then
+      log:infof("Skipping HTML compilation of pdf-only file %s",file.relative_path) 
+      goto endofthiscompilation 
+    end
+  
 
      local infix = ""
     if command_metadata.infix and command_metadata.infix ~= "" then
