@@ -8,6 +8,51 @@ local path = require "pl.path"
 local url = require("socket.url")
 -- local url = require "lualibs-url"
 
+function getRelativePath(base, targ)
+  -- Normalize paths by ensuring both are absolute
+  local function normalize(path)
+      -- Remove trailing slashes for consistency
+      return path:gsub("/$", ""):gsub("\\$", "")
+  end
+
+  base = normalize(base)
+  targ = normalize(targ)
+
+  -- Split paths into components
+  local baseParts = {}
+  local targParts = {}
+
+  for part in base:gmatch("[^/\\]+") do
+      table.insert(baseParts, part)
+  end
+
+  for part in targ:gmatch("[^/\\]+") do
+      table.insert(targParts, part)
+  end
+
+  -- Find the common prefix
+  local i = 1
+  while i <= #baseParts and i <= #targParts and baseParts[i] == targParts[i] do
+      i = i + 1
+  end
+
+  -- Calculate the number of steps to go up from base
+  local upSteps = #baseParts - i + 1
+  local relativeParts = {}
+
+  -- Add `..` for each step up
+  for _ = 1, upSteps do
+      table.insert(relativeParts, "..")
+  end
+
+  -- Add the remaining parts of the target path
+  for j = i, #targParts do
+      table.insert(relativeParts, targParts[j])
+  end
+
+  -- Join the relative parts into a path
+  return table.concat(relativeParts, "/")
+end
 
 -- Function to create a backup copy of a file
 local function backup_file(original_filename, extension)
@@ -178,10 +223,14 @@ local function transform_xourse(dom, file)
       -- add .html if no extension (anymore)
       if path.extension(newhref) == "" then newhref = newhref .. ".html" end
       
-      if newhref ~= href then 
+      local relhref = file.reldir.."/"..newhref
+
+      log:errorf("MAKE %s to %s (%s)", href, relhref, file.relative_path)
+
+      if relhref ~= href then 
         -- TODO: href has now added .html suffix. but maybe it was without suffix for some specific reason in the first place
-        log:debug("Resetting href to "..newhref .. "( from "..href..")") 
-        activity:set_attribute("href",newhref)
+        log:debug("Resetting href to "..relhref .. "( from "..href..")") 
+        activity:set_attribute("href",relhref)
       end
       
       local htmlpath = file.absolute_dir .. "/" .. newhref
@@ -424,7 +473,21 @@ local function process(file)
     local f = io.open(jax_file, "r")
     local cmds = f:read("*a")
     f:close()
-    local filtered_cmds= cmds:gsub("[^\n]*[:*@].-\n", "")
+
+    -- Function to keep only lines starting with \new
+    local function filter_newcommands(text)
+      local result = {}
+      for line in text:gmatch("[^\r\n]+") do
+        if line:match("^\\newcommand") or line:match("^\\DeclareMathOperator") then
+            table.insert(result, line)
+        end
+      end
+      return table.concat(result, "\n")
+    end
+
+    local filtered_cmds = cmds
+    filtered_cmds= filtered_cmds:gsub("[^\n]*[-:_*@].-\n", "")
+    filtered_cmds= filter_newcommands(filtered_cmds)
     
     local _, n_cmds = cmds:gsub("\n","")
     local _, n_filtered_cmds = filtered_cmds:gsub("\n","")
