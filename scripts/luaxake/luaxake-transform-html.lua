@@ -185,7 +185,7 @@ local function read_title_and_abstract(activity_dom)
   local title, abstract
   local title_el = activity_dom:query_selector("title")[1]
   if title_el then title = title_el:get_text() end
-  log:debug("Read title ", title)
+  log:trace("Read title ", title)
   local abstract_el = activity_dom:query_selector("div.abstract")[1]
   if abstract_el then
     return title, abstract_el:get_text()
@@ -224,8 +224,7 @@ local function transform_xourse(dom, file)
       if path.extension(newhref) == "" then newhref = newhref .. ".html" end
       
       local relhref = file.reldir.."/"..newhref
-
-      log:errorf("MAKE %s to %s (%s)", href, relhref, file.relative_path)
+      relhref = relhref:gsub("^/","")   -- remove leading /
 
       if relhref ~= href then 
         -- TODO: href has now added .html suffix. but maybe it was without suffix for some specific reason in the first place
@@ -254,9 +253,11 @@ local function transform_xourse(dom, file)
           if title and title ~= "" then
             local h2 = parent:create_element("h2")
             local h2_text = h2:create_text_node(title )
-            log:debug("Adding h2 for "..href..": "..title) 
+            log:trace("Adding title for "..href..": "..title) 
             h2:add_child_node(h2_text)
             parent:add_child_node(h2,1)
+          else 
+            log:debug("No title found for "..href)
           end
           -- the problem with abstract is that Ximera redefines \maketitle in TeX4ht to produce nothing, 
           -- abstract in Ximera is part of \maketitle, so abstracts are missing in the generated HTML
@@ -264,7 +265,7 @@ local function transform_xourse(dom, file)
             --require 'pl.pretty'.dump(abstract)
             local h3 = parent:create_element("h3")
             local h3_text = h3:create_text_node(abstract)
-            log:debug("Adding abstract (h3) for "..href..": "..abstract) 
+            log:trace("Adding abstract (h3) for "..href..": "..abstract) 
             h3:add_child_node(h3_text)
             parent:add_child_node(h3,1)
           end
@@ -448,6 +449,15 @@ local function process(file)
   remove_empty_paragraphs(dom)
   add_dependencies(dom, file)
 
+  for _, mjax in ipairs(dom:query_selector(".mathjax-inline, .mathjax-block")) do
+    local mtext = mjax:get_text()
+    mtext = mtext:gsub("\\begin%s*{", "\\begin{")
+    mtext = mtext:gsub("\\end%s*{", "\\end{")
+    if mtext ~= mjax:get_text() then
+      log:warningf("Set mtext to %s",mtext)
+      mjax.textContent = mtext
+    end
+  end
 
   log:debug("Check if .jax file is present") 
   local jax_file = html_name:gsub(".html$", ".xmjax")
