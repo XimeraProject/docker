@@ -460,12 +460,13 @@ local function process(file)
   remove_empty_paragraphs(dom)
   add_dependencies(dom, file)
 
+  -- Fix blanco's between \begin {environment}  (confuses MathJAX2, should be solved in Tex4ht) 
   for _, mjax in ipairs(dom:query_selector(".mathjax-inline, .mathjax-block")) do
     local mtext = mjax:get_text()
     mtext = mtext:gsub("\\begin%s*{", "\\begin{")
     mtext = mtext:gsub("\\end%s*{", "\\end{")
     if mtext ~= mjax:get_text() then
-      log:warningf("Set mtext to %s",mtext)
+      log:tracef("Set mtext to %s",mtext)
       mjax.textContent = mtext
     end
   end
