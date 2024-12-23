@@ -508,7 +508,7 @@ local function process(file)
     end
 
     local filtered_cmds = cmds
-    filtered_cmds= filtered_cmds:gsub("[^\n]*[-:_*@].-\n", "")     -- remove 'exotic' commands
+    filtered_cmds= filtered_cmds:gsub("[^\n]*[-:*@].-\n", "")      -- remove 'exotic' commands; _ must be kept...
     filtered_cmds= filter_newcommands(filtered_cmds)               -- only keep newcommands and declaremathoperator
     filtered_cmds= filtered_cmds:gsub("##(%d)", "#%1")             -- replace ##1 with #1
     
