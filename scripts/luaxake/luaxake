@@ -155,7 +155,7 @@ config = {
     html = {
       -- command = "make4ht -f html5+dvisvgm_hashes -c @{config_file} -sm draft @{filename}",
       -- command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes -s @{make4ht_mode} -a debug @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
-      command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes          -j @{basename}.make4ht -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
+      command = "make4ht -l -c @{config_file} -f html5+dvisvgm_hashes          -j @{basename}.make4ht -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
       process_html = false,
@@ -164,7 +164,7 @@ config = {
       infix = "make4ht" ,
     },
     ["make4ht.html"] = {
-      command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes          -j @{basename}.make4ht -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
+      command = "make4ht -l -c @{config_file} -f html5+dvisvgm_hashes          -j @{basename}.make4ht -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
       process_html = false,
@@ -174,7 +174,7 @@ config = {
     },
     -- do not use, only for testing
     ["draft.html"] = {
-      command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes -m draft -j @{basename}.draft -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
+      command = "make4ht -l -c @{config_file} -f html5+dvisvgm_hashes -m draft -j @{basename}.draft -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
       post_command = 'process_html',
@@ -388,7 +388,7 @@ end
 
       table.insert(all_statuses,statuses)
 
-      -- Already now print the error(s); a summary should be reapeated at the end
+      -- Already now print the error(s); a summary should be repeated at the end
       compile.print_errors(statuses)
       compile.clean(file, config.clean)
     end
