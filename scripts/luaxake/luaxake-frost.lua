@@ -379,5 +379,6 @@ end
 M.get_output_files      = get_output_files
 M.frost      = frost
 M.serve      = serve
+M.osExecute      = osExecute
 
 return M

@@ -6,7 +6,8 @@ local path = pl.path
 local pldir = pl.dir
 local plfile = pl.file
 local html = require "luaxake-transform-html"
-local files = require "luaxake-files"      -- for get_metadaa
+local files = require "luaxake-files"      -- for get_metadata
+local frost = require "luaxake-frost"      -- for osExecute
 local socket = require "socket"
 
 local log = logging.new("compile")
@@ -91,6 +92,12 @@ function move_to_downloads(file, cmd_meta, root_dir)
   else
     log:warningf("No output file found for ",file.relative_path)
   end
+
+  if file.relative_path:match("_pdf.tex$" ) then
+    log:infof("Convert _pdf.pdf file to svg for  %s",file.relative_path) 
+    frost.osExecute("pdf2svg " .. file.absolute_path:gsub(".tex",".pdf") .. " " .. file.absolute_path:gsub(".tex",".svg"))
+  end
+
   return 1, 'NOK'
 end
 
