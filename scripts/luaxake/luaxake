@@ -125,11 +125,6 @@ config = {
   -- compile_sequence = {"pdf", "sagetex.sage", "pdf", "html"},
   -- see infra --   default_dependencies = { "xmPreamble.tex" },     -- add here e.g. xmPreamble, ximera.cls, ...
   compilers = {
-    -- just a dummy test: create .ddd files that contain the date ..
-    ddd = {
-      command = 'date >@{basename}.ddd',     
-      status = 0, -- check that the latex command return 0
-    },
     pdf = {
       -- this doesn't work well
       -- command = 'pdflatex -interaction=nonstopmode  -file-line-error -shell-escape  "\\PassOptionsToClass{tikzexport}{ximera}\\PassOptionsToClass{xake}{ximera}\\PassOptionsToClass{xake}{xourse}\\nonstopmode\\input{@{filename}}"',
@@ -151,7 +146,7 @@ config = {
       post_command = 'move_to_downloads',
       download_folder = 'ximera-downloads/handouts',
     },
-    -- 20241217: use make4ht.html !
+    -- 20241217: use make4ht.html (this keeps logfiles etc from being overwritten ...)!
     html = {
       -- command = "make4ht -f html5+dvisvgm_hashes -c @{config_file} -sm draft @{filename}",
       -- command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes -s @{make4ht_mode} -a debug @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
@@ -164,7 +159,7 @@ config = {
       infix = "make4ht" ,
     },
     ["make4ht.html"] = {
-      command = "make4ht -l -c @{config_file} -f html5+dvisvgm_hashes          -j @{basename}.make4ht -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
+      command = "make4ht -l -c @{config_file} -f html5+dvisvgm_hashes          -j @{basename}.make4ht -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
       process_html = false,
@@ -172,9 +167,17 @@ config = {
       extension = "html",
       infix = "make4ht" ,
     },
-    -- do not use, only for testing
     ["draft.html"] = {
       command = "make4ht -l -c @{config_file} -f html5+dvisvgm_hashes -m draft -j @{basename}.draft -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
+      check_log = true, -- check log
+      status = 0, -- check that the latex command return 0
+      post_command = 'process_html',
+      extension = "html",
+      infix = "draft" ,
+    },
+    -- test: use 'tikz+' option (FAILS for some tikzpictures, eg with shading/patterns)
+    ["tikz.html"] = {
+      command = "make4ht -l -c @{config_file} -f html5+dvisvgm_hashes -m draft -j @{basename}.draft -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
       post_command = 'process_html',
@@ -189,7 +192,11 @@ config = {
       status = 0, -- check that the latex command return 0
       extension = "sage",   -- ?
     },
-
+    -- a dummy test: create .ddd files that contain the date ..
+    ddd = {
+      command = 'date >@{basename}.ddd',     
+      status = 0, -- check that the command returns 0
+    },
   },
   -- used for dependency-checking in .tex files
   input_commands = {
