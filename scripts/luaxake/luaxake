@@ -118,8 +118,10 @@ end
 --- @field config_file         string   TeX4ht config file 
 
 config = {
+  -- dump_fileinfo = ".html",     -- for debugging: dumps the 'fileinfo' of matching files
   -- list of outputs ( and extensions )
-  output_formats = {"make4ht.html", "pdf", "handout.pdf"},
+  output_formats = {"html", "pdf", "handout.pdf"},
+  -- output_formats = {"make4ht.html", "pdf", "handout.pdf"},
   -- output_formats = {"html", "pdf", "sagetex.sage"},    -- TODO: check/implement sage
   compile_sequence = {"pdf", "make4ht.html", "handout.pdf"},
   -- compile_sequence = {"pdf", "sagetex.sage", "pdf", "html"},
@@ -243,7 +245,7 @@ config = {
 -- set/add potential default dependencies
 if not config.default_dependencies and path.exists("xmPreamble.tex") then
   log:info("Adding default dependency xmPreamble.tex")
-  config.default_dependencies = { files.get_metadata("xmPreamble.tex") }
+  config.default_dependencies = { files.get_fileinfo("xmPreamble.tex") }
 else
   config.default_dependencies = {}
 end
@@ -307,7 +309,7 @@ for i,nextarg in ipairs(config.dirs) do
     nextarg = nextarg..".tex"
   elseif    ( path.isfile(nextarg) and nextarg:match("%.tex$") ~= nil   )     -- an existing TeX-file
   then
-    local metadata = files.get_metadata(nextarg)
+    local metadata = files.get_fileinfo(nextarg)
     metadata.needs_compilation = true;
     log:debug("Explicitly adding tex file "..metadata.filename)
     more_tex_files = { metadata }

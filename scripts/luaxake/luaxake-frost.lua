@@ -43,23 +43,23 @@ local function get_output_files(file, extension)
     for _, entry in ipairs(file.output_files) do
         if entry.extension == extension then --and entry.info.type == targetType then
             if extension == "make4ht.html" then
-                local file = files.get_metadata(entry.reldir, entry.basenameshort..".html")
+                local file = files.get_fileinfo(entry.relative_dir .."/" .. entry.basenameshort..".html")
                 -- require 'pl.pretty'.dump(entry)
                 -- require 'pl.pretty'.dump(file)
                 table.insert(result, file)
-                log:debug(string.format("Hacking %-4s outputfile: %s ", file.extension, file.absolute_path))
+                log:debug(string.format("Hacking  %-14s outputfile: %s ", file.extension, file.absolute_path))
             elseif extension == "draft.html" then
-                local file = files.get_metadata(entry.reldir, entry.basenameshort..".html")
+                local file = files.get_metadata(entry.relative_dir .. "/" .. entry.basenameshort..".html")
                 -- require 'pl.pretty'.dump(entry)
                 -- require 'pl.pretty'.dump(file)
                 table.insert(result, file)
-                log:debug(string.format("Hacking %-4s outputfile: %s ", file.extension, file.absolute_path))
+                log:debug(string.format("Hacking  %-14s outputfile: %s ", file.extension, file.absolute_path))
             else
                 table.insert(result, entry)
-                log:debug(string.format("Adding %-4s outputfile: %s ", entry.extension, entry.absolute_path))
+                log:debug(string.format("Adding   %-14s outputfile: %s ", entry.extension, entry.absolute_path))
             end
         else
-            log:tracef("Skipping %-4s outputfile: %s ", entry.extension, entry.absolute_path)
+            log:tracef("Skipping %-14s outputfile: %s ", entry.extension, entry.absolute_path)
         end
     end
     return result
@@ -135,7 +135,7 @@ end
 ---@param file metadata    -- presumably only root-folder really makes sense for 'frosting'
 ---@return boolean status
 ---@return string? msg
-local function frost(tex_files, to_be_compiled_files, root)
+local function frost(tex_files, to_be_compiled_files, root_folder)
     log:debug("frost")
 
     local uncommitted_files = get_git_uncommitted_files()
@@ -145,7 +145,7 @@ local function frost(tex_files, to_be_compiled_files, root)
     end
     
     if #to_be_compiled_files > 0 then
-        log:warningf("There are %d file to be compiled; serving only to localhost", #to_be_compiled_files)
+        log:warningf("There are %d file to be compiled; should serve only to localhost", #to_be_compiled_files)
     end
 
     -- local tex_files = files.get_tex_files_with_status(root, config.output_formats, config.compilers)
@@ -155,19 +155,21 @@ local function frost(tex_files, to_be_compiled_files, root)
     local all_labels = {}
     local tex_xourses = {}
     for i, tex_file in ipairs(tex_files) do
-        log:debug("Output for "..tex_file.absolute_path)
+        log:debugf("Getting output for %s (%s)", tex_file.absolute_path, tex_file.relative_path)
         needing_publication[#needing_publication + 1] = tex_file.relative_path
 
-        local html_files = get_output_files(tex_file, "make4ht.html")
+        local html_files = get_output_files(tex_file, "html")
+        -- local html_files = get_output_files(tex_file, "make4ht.html")
         
         for i,html_file in ipairs(html_files) do
         -- require 'pl.pretty'.dump(html_file)
 
-            log:debug("Output for "..html_file.absolute_path)
+            log:debugf("Processing %s", html_file.relative_path)
             needing_publication[#needing_publication + 1] = html_file.relative_path
 
             local html_name = html_file.absolute_path
             local dom, msg = html.load_html(html_name)
+
             if not dom and not ( tex_file.relative_path:match("_pdf.tex") or tex_file.relative_path:match("_beamer.tex")  ) then 
                 log:errorf("No dom for %s (%s). SKIPPING", html_name, msg)
                 break
@@ -199,7 +201,7 @@ local function frost(tex_files, to_be_compiled_files, root)
             -- Store xourses, they have to be added to metadata.json
             if tex_file.tex_type == "xourse" then
                 log:info("Adding XOURSE "..tex_file.absolute_path.." ("..html_file.title..")")
-                tex_xourses[html_file.basename] = { title = html_file.title, abstract = html_file.abstract } 
+                tex_xourses[html_file.relative_path:gsub(".html","")] = { title = html_file.title, abstract = html_file.abstract } 
             end
 
         end

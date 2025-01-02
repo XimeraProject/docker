@@ -142,6 +142,24 @@ local function compile(file, compilers, compile_sequence, only_check)
     
     if extension:match("html$") and ( file.relative_path:match("_pdf.tex$") or file.relative_path:match("_beamer.tex$") ) then
       log:infof("Skipping HTML compilation of pdf-only file %s",file.relative_path) 
+
+      local filename = file.absolute_path:gsub(".tex$",".html")
+      local file, err = io.open(filename, "r")
+    
+      if file then
+          -- File exists, update modification time
+          file:close()
+          lfs.touch(filename)
+      else
+          -- File doesn't exist, create a new one
+          file, err = io.open(filename, "w")
+          if file then
+              file:close()
+          else
+              log:infof("Failed to fix dummy htmlfile %s: %s",filename,err)
+          end
+      end
+
       goto endofthiscompilation 
     end
   
@@ -239,7 +257,7 @@ local function compile(file, compilers, compile_sequence, only_check)
 
       -- store outputfiles with metadata
       -- log:infof("ADDING METADATA FOR %s : %s (from %s)",current_dir, output_file, file.absolute_dir)
-      local ofile = files.get_metadata(file.absolute_dir, output_file)
+      local ofile = files.get_fileinfo(file.absolute_dir .. "/" .. output_file)
 
       log:debug("Adding outputfile "..ofile.relative_path.. " to "..file.relative_path)
       -- require 'pl.pretty'.dump(ofile)

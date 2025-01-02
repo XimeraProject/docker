@@ -228,7 +228,7 @@ local function transform_xourse(dom, file)
       -- add .html if no extension (anymore)
       if path.extension(newhref) == "" then newhref = newhref .. ".html" end
       
-      local relhref = file.reldir.."/"..newhref
+      local relhref = file.relative_dir.."/"..newhref
       relhref = relhref:gsub("^/","")   -- remove leading /
 
       if relhref ~= href then 
@@ -370,7 +370,7 @@ local function get_associated_files(dom, file)
   -- Add images 
   for _, img_el in ipairs(dom:query_selector("img") ) do
     local src = img_el:get_attribute("src")
-    src = (file.dir or ".").."/"..src
+    src = (file.relative_dir or ".").."/"..src
     log:debug("Found img "..src)
 
     if not path.exists(src) then
@@ -458,9 +458,8 @@ local function process(file)
   local dom, msg = load_html(html_name)
   if not dom then return false, msg end
   remove_empty_paragraphs(dom)
-  add_dependencies(dom, file)
+  -- add_dependencies(dom, file)    -- IS THIS NEEDED???
 
-  -- Fix blanco's between \begin {environment}  (confuses MathJAX2, should be solved in Tex4ht) 
   for _, mjax in ipairs(dom:query_selector(".mathjax-inline, .mathjax-block")) do
     local mtext = mjax:get_text()
     mtext = mtext:gsub("\\begin%s*{", "\\begin{")
