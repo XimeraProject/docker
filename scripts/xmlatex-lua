@@ -306,6 +306,8 @@ reset_file_times() {
  fi
 }
 
+
+
 xake_name() {
     # TODO: migrate to lua ...?
     echo "Doing xake $COMMAND"
@@ -463,6 +465,8 @@ git config  --get user.name  || { echo Setting git user.name; git config user.na
 git config  --get user.email || git config user.email "xmlatex@xakecontainer"
 
 }
+
+reset_file_times
 
 
 if [[ "$COMMAND" == "bash" ]]
