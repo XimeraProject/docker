@@ -66,9 +66,10 @@ local function get_output_files(file, extension)
 end
 
 local function get_git_uncommitted_files()
-     local ret, out = osExecute("git ls-files --modified --other  --exclude-standard")
+    --  local ret, out = osExecute("git ls-files --modified --other  --exclude-standard")
+     local ret, out = osExecute("git status --porcelain")
     if ret > 0 then
-        osError("Could not get git info: %s",out)
+        log:warningf("Could not get git info: %s",out)
         out = "GIT ERROR"
     end
     local utils = require "pl.utils"
@@ -140,8 +141,8 @@ local function frost(tex_files, to_be_compiled_files, root_folder)
 
     local uncommitted_files = get_git_uncommitted_files()
 
-    if uncommitted_files then
-        log:warningf("There are %d uncommitted files; serving only to localhost", #uncommitted_files)
+    if #uncommitted_files > 0 then
+        log:warningf("There are %d uncommitted files; should serve only to localhost", #uncommitted_files)
     end
     
     if #to_be_compiled_files > 0 then
@@ -157,9 +158,14 @@ local function frost(tex_files, to_be_compiled_files, root_folder)
     for i, tex_file in ipairs(tex_files) do
         log:debugf("Getting output for %s (%s)", tex_file.absolute_path, tex_file.relative_path)
         needing_publication[#needing_publication + 1] = tex_file.relative_path
-
-        local html_files = get_output_files(tex_file, "html")
-        -- local html_files = get_output_files(tex_file, "make4ht.html")
+        
+        local html_files = {}
+        if  tex_file.relative_path:match("_pdf.tex") or tex_file.relative_path:match("_beamer.tex")  then 
+            log:tracef("No html output for _pdf or _beamer files: skipping %s", tex_file.relative_path)
+        else
+            html_files = get_output_files(tex_file, "html")
+            -- local html_files = get_output_files(tex_file, "make4ht.html")        
+        end
         
         for i,html_file in ipairs(html_files) do
         -- require 'pl.pretty'.dump(html_file)
@@ -170,7 +176,7 @@ local function frost(tex_files, to_be_compiled_files, root_folder)
             local html_name = html_file.absolute_path
             local dom, msg = html.load_html(html_name)
 
-            if not dom and not ( tex_file.relative_path:match("_pdf.tex") or tex_file.relative_path:match("_beamer.tex")  ) then 
+            if not dom then 
                 log:errorf("No dom for %s (%s). SKIPPING", html_name, msg)
                 break
             end
@@ -209,13 +215,12 @@ local function frost(tex_files, to_be_compiled_files, root_folder)
 
     -- TODO: check/fix use of 'github'; check use of labels
     local xmmetadata={
-        xakeVersion = "2.1.3",
+        xakeVersion = "2.5",
         labels = all_labels,
-        githubexample = {
-
-            owner = "XimeraProject",
-            repository = "ximeraExperimental"
-        },
+        -- githubexample = {
+        --     owner = "XimeraProject",
+        --     repository = "ximeraExperimental"
+        -- },
         github = {},
         xourses = tex_xourses,
     }
@@ -365,15 +370,30 @@ local function serve()
 
     log:debugf("Got publication: %s",most_recent_publication)
 
+    local ret, remote_ximera = osExecute("git remote get-url ximera")
     
+    if ret > 0 then
+        log:warning("No remote 'ximera' found. Need 'name' first?")
+        return 1, "No remote 'ximera' found"
+    end
+
+
     local tree_oid, tag_oid, tagName = most_recent_publication:match("([^%s]+) ([^%s]+) ([^%s]+)")
 
     log:infof("Publishing  %s  (tree:%s tag:%s) ", tagName, tree_oid, tag_oid)
     
-    osExecute("git push -f ximera "..tagName)
-    osExecute("git push -f ximera "..tag_oid..":refs/heads/master")     -- HACK ???
+    local ret, output = osExecute("git push -f ximera "..tagName)
+    if ret > 0 then
+        log:tracef("Could not push to 'ximera' target: %s",output)
+        return ret,output
+    end
+    local ret, output =  osExecute("git push -f ximera "..tag_oid..":refs/heads/master")     -- HACK ???
+    if ret > 0 then
+        log:tracef("Could not push refs to 'ximera' target: %s",output)
+        return ret,output
+    end
     
-    log:statusf("Published  %s", tagName)
+    log:statusf("Published %s to     %s", tagName, remote_ximera)
 
     return 0,'OK'
 end
