@@ -209,10 +209,10 @@ local function transform_xourse(dom, file)
       local relhref = file.relative_dir.."/"..newhref
       relhref = relhref:gsub("^/","")   -- remove leading /
 
-      if relhref ~= href then 
-        -- TODO: href has now added .html suffix. but maybe it was without suffix for some specific reason in the first place
-        log:debug("Resetting href to "..relhref .. "( from "..href..")") 
-        activity:set_attribute("href",relhref)
+      if relhref:gsub(".html$","") ~= href then 
+        -- The  .html extension breaks the previous/next buttons in ximeraServer 
+        log:debug("Resetting href to "..relhref:gsub(".html$","") .. "( from "..href..")") 
+        activity:set_attribute("href",relhref:gsub(".html$",""))
       end
       
       local htmlpath = file.absolute_dir .. "/" .. newhref
@@ -328,7 +328,7 @@ local function get_associated_files(dom, file)
   -- pl.pretty.dump(file)
 
   if not dom then
-    log:warning("Passed nil to get_associated files for %s...? No files returned.", file.filename or "<NO__FILE>")
+    log:warning("Passed nil to get_associated_files for %s...? No files returned.", file.filename or "<NO__FILE>")
     return {}
   end
 
