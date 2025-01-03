@@ -85,27 +85,6 @@ local function backup_file(original_filename, extension)
   return true
 end
 
-
---- find metadata for the HTML file
----@param file metadata
----@return metadata|nil html file
----@return string? error
-local function find_html_file(file)
-  -- file metadata passed to the process function are for the TeX file 
-  -- we need to find metadata for the output HTML file
-  log:trace("find_html_file for "..file.filename)
-  for _, output in ipairs(file.output_files) do
-    -- log:debug("Checking for 'html': "..(output.metadata.filename or "") )
-    if output.extension == "html" then
-      log:trace("Returning: "..(output.filename or ""))
-      -- require 'pl.pretty'.dump(output)
-      return output
-    end
-  end
-  return nil, "Cannot find output HTML file for "..file.filename
-end
-
-
 local html_cache = {}
 
 --- load DOM from a HTML file
@@ -135,21 +114,20 @@ end
 --- detect if the HTML file is xourse
 ---@param dom DOM_Object
 ---@return boolean
-local function is_xourse(dom, html_file)
+local function is_xourse(dom, filename)
   local metas = dom:query_selector("meta[name='description']")
   if #metas == 0 then
-    -- log:warning("Cannot find any meta[description] tags in " .. html_file.absolute_path)
-    log:debug("No meta[description] tags in " .. html_file.absolute_path .. " (and thus not a xourse)")
+    log:debug("No meta[description] tags in " .. filename .. " (and thus not a xourse)")
   end
   for _, meta in ipairs(metas) do
     if meta:get_attribute("content") == "xourse" then
-      log:debug("File "..html_file.relative_path.." is a xourse")
+      log:debug("File "..filename.." is a xourse")
       return true
     else
-      log:debug("File "..html_file.relative_path.." has not-a-xourse description tag  "..(meta.get_attribute("content") or ""))
+      log:debug("File "..filename.." has not-a-xourse description tag  "..(meta.get_attribute("content") or ""))
     end
   end
-  -- log:debug("File "..html_file.relative_path.." is not a xourse ")
+  -- log:debug("File "..filename.." is not a xourse ")
   return false
 end
 
@@ -214,7 +192,7 @@ end
 
 --- Transform Xourse files
 ---@param dom DOM_Object
----@param file metadata
+---@param file fileinfo
 ---@return DOM_Object
 local function transform_xourse(dom, file)
   for _, activity in ipairs(dom:query_selector("a.activity")) do
@@ -303,9 +281,9 @@ end
 
 
 
---- Add metadata with TeX file dependencies to the HTML DOM
+--- Add fileinfo with TeX file dependencies to the HTML DOM
 ---@param dom DOM_Object
----@param file metadata
+---@param file fileinfo
 ---@return DOM_Object
 local function add_dependencies(dom, file)
   -- we will add also TeX file of the current HTML file
@@ -343,7 +321,7 @@ end
 
 --- Get all files 'associated' with a given file (i.e. images)
 ---@param dom DOM_Object
----@param file metadata
+---@param file fileinfo
 ---@return table
 local function get_associated_files(dom, file)
   log:debug("get_associated_files for "..file.filename)
@@ -390,19 +368,6 @@ local function get_associated_files(dom, file)
       log:debug("also adding  "..png)
       ass_files[#ass_files+1] = png
     end
-    -- sourceUrl, err := url.Parse(source)
-
-    -- if err == nil {
-    --   if sourceUrl.Host == "" {
-    --     imgPath := filepath.Clean(filepath.Join(filepath.Dir(htmlFilename), sourceUrl.Path))
-    --     results = append(results, imgPath)
-
-    --     if filepath.Ext(imgPath) == ".svg" {
-    --       pngFilename := strings.TrimSuffix(imgPath, filepath.Ext(imgPath)) + ".png"
-    --       results = append(results, pngFilename)
-    --     }
-    --   }
-    -- }
   
   end
   log:debug("get_associated_files done "..file.filename)
@@ -420,42 +385,22 @@ local function save_html(dom, filename)
   end
   f:write(dom:serialize())
   f:close()
-  return true
+  return true, filename
 end
 
 
--- local function osExecute(cmd)
---   log:info("Exec: "..cmd)
---   local fileHandle = assert(io.popen(cmd .. " 2>&1", 'r'))
---   local commandOutput = assert(fileHandle:read('*a'))
---   local returnCode = fileHandle:close() and 0 or 1
---   commandOutput = string.gsub(commandOutput, "\n$", "")
---   log:info("Gets: "..returnCode..": "..commandOutput)
---   return returnCode, commandOutput
--- end
-
 --- Post-process HTML files
----@param file metadata 
+---@param file fileinfo 
 ---@return boolean status
 ---@return string? msg
-local function process(file)
-  log:debug("process "..file.absolute_path)
-  
-  -- we must find metadata for the HTML file, because `file` is metadata of the TeX file
-  local html_file, msg = find_html_file(file)
-  if not html_file then 
-    log:error("No HTML file found for "..file.relative_path)
-    return false, msg 
-  end
-  -- log:debug("Found html_file "..(html_file.filename or "").." for file "..file.filename)
- 
-  local html_name = html_file.absolute_path
-  
+local function post_process_html(src, file, cmd_meta, root_dir)
+  log:debugf("post_process_html %s",src)
+    
   -- only for debugging
   -- local hash_orig = hash_file(html_name)
   -- backup_file(html_name, hash_orig..".bak" or "ORIG.bak")
   
-  local dom, msg = load_html(html_name)
+  local dom, msg = load_html(src)
   if not dom then return false, msg end
   remove_empty_paragraphs(dom)
   -- add_dependencies(dom, file)    -- IS THIS NEEDED???
@@ -471,7 +416,7 @@ local function process(file)
   end
 
   log:debug("Check if .jax file is present") 
-  local jax_file = html_name:gsub(".html$", ".xmjax")
+  local jax_file = src:gsub(".html$", ".xmjax")
   if not path.exists(jax_file) then
     log:warning("Strange: no JAX file with extra LaTeX commands for MathJAX")
     jax_file = nil
@@ -525,47 +470,39 @@ local function process(file)
   file.title = title or ""
   file.abstract = abstract or ""
   
-  if is_xourse(dom, html_file) then
+  if is_xourse(dom, src) then
     transform_xourse(dom, file)
 
     
-  log:debug("Checking if a 'part' is present") 
-  local part = dom:query_selector(".card.part")
+    log:debug("Checking if a 'part' is present") 
+    local part = dom:query_selector(".card.part")
 
-  if #part == 0 then
-    log:debug("No parts: add one") 
-    
-    local body = dom:query_selector("body")[1]
-    local first_activity = dom:query_selector(".card.activity")[1]
-    if first_activity then
-      log:info("Adding default card of type 'part' (HACK: needed by current preview server)") 
-      local h1 = body:create_element("h1")
-      local h1_text = h1:create_text_node("Main Part")
-      h1:add_child_node(h1_text)
-      h1:set_attribute("class", "card part")
-      body:add_child_node(h1,6)    -- the 3 is a guess  
-    else
-      log:debug("No 'activity' card found ??? ") 
+    if #part == 0 then
+      log:info("No parts found, adding one, as this is needed in (some versions of) the ximeraServer") 
+
+      local body = dom:query_selector("body")[1]
+      local first_activity = dom:query_selector(".card.activity")[1]
+      if first_activity then
+        log:debug("Adding default card of type 'part' (HACK: needed by current preview server)") 
+        local h1 = body:create_element("h1")
+        local h1_text = h1:create_text_node("Main Part")
+        h1:add_child_node(h1_text)
+        h1:set_attribute("class", "card part")
+        body:add_child_node(h1,6)    -- the 3 is a guess  
+      else
+        log:warning("BIZAR: No 'activity' card found to add a dummy 'part' to ??? ") 
+      end
     end
-  end
-
   --<h1 class='card part' id='part1'>The First Topic of This Course</h1>
-
-
   end
 
-  if string.match(html_name,".make4ht.") then
-    html_name = html_name:gsub(".make4ht","")
-  end 
-  if string.match(html_name,".draft.") then
-    html_name = html_name:gsub(".draft","")
-  end 
+  local tgt = string.format("%s/%s.%s", file.absolute_dir, file.basename, cmd_meta.extension)
 
-  log:infof("Adapted html being saved as %s", html_name )
-  return save_html(dom, html_name) 
+  log:infof("Adapted html being saved as %s", tgt )
+  return save_html(dom, tgt) 
 end
 
-M.process = process
+M.post_process_html = post_process_html
 M.load_html = load_html
 M.get_labels = get_labels
 M.get_associated_files = get_associated_files

@@ -136,7 +136,7 @@ config = {
       status = 0,           -- check that the latex command return 0
       infix = "" ,          -- used for .handout, and .make4k4
       extension = "pdf",    -- not used ????
-      post_command = 'move_to_downloads',
+      post_command = 'post_process_pdf',
       download_folder = 'ximera-downloads/with-answers',
     },
     ["handout.pdf"] = {
@@ -145,7 +145,7 @@ config = {
       status = 0, -- check that the latex command return 0
       extension = "handout.pdf",
       infix = "handout" ,
-      post_command = 'move_to_downloads',
+      post_command = 'post_process_pdf',
       download_folder = 'ximera-downloads/handouts',
     },
     -- 20241217: use make4ht.html (this keeps logfiles etc from being overwritten ...)!
@@ -156,7 +156,7 @@ config = {
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
       process_html = false,
-      post_command = 'process_html',
+      post_command = 'post_process_html',
       extension = "html",
       infix = "make4ht" ,
     },
@@ -165,7 +165,7 @@ config = {
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
       process_html = false,
-      post_command = 'process_html',
+      post_command = 'post_process_html',
       extension = "html",
       infix = "make4ht" ,
     },
@@ -173,7 +173,7 @@ config = {
       command = "make4ht -l -c @{config_file} -f html5+dvisvgm_hashes -m draft -j @{basename}.draft -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
-      post_command = 'process_html',
+      post_command = 'post_process_html',
       extension = "html",
       infix = "draft" ,
     },
@@ -182,7 +182,7 @@ config = {
       command = "make4ht -l -c @{config_file} -f html5+dvisvgm_hashes -m draft -j @{basename}.draft -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
-      post_command = 'process_html',
+      post_command = 'post_process_html',
       extension = "html",
       infix = "draft" ,
     },
