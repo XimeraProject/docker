@@ -32,8 +32,8 @@ local firstLetter = string.char(65 + (pid % 26))  -- First letter (A-Z)
 local secondLetter = string.char(65 + ((pid // 26) % 26))  -- Second letter (A-Z)
 
 local run_identifier = firstLetter .. secondLetter
-logging.use_runidentifier = true
-logging.dateformat = "%Y%m%d_".. run_identifier.." %H:%M:%S"
+-- logging.use_runidentifier = true
+logging.dateformat = run_identifier.."_%Y%m%d %H:%M:%S"
 
 
 
