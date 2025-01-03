@@ -270,7 +270,8 @@ local function update_depends_on_files(fileinfo)
     local content = f:read("*a")
     f:close()
     -- remove all comments
-    content = content:gsub("([^\\])%%.-\n", "%1\n")
+    -- content = content:gsub("([^\\])%%.-\n", "%1\n")
+    content = content:gsub("%%[^\n]*", "")
     -- loop over all LaTeX commands with arguments
     for command, argument in content:gmatch("\\(%w+)%s*{([^%}]+)}") do
       -- add dependency if the current command is \input like
