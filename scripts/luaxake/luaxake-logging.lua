@@ -14,8 +14,8 @@ logging.use_colors = true
 logging.modes = {
   {name = "trace", color = 36},
   {name = "debug", color = 34},
-  {name = "info", color = 32},
-  {name = "status", color = 37},
+  {name = "info", color = 37},
+  {name = "status", color = 32},
   {name = "warning", color = 33}, 
   {name = "error", color = 31, status = 1},
   {name = "fatal", color = 35, status = 2}
