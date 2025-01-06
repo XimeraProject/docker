@@ -108,6 +108,12 @@ local function compile(file, compilers, compile_sequence, only_check)
       log:errorf("No compiler defined for %s (%s); SKIPPING",extension,file.relative_path)
       goto endofthiscompilation  -- nice: a goto-statement !!!
     end
+    -- This could/should perhaps be handled higher up? Compilation of e.g. preamble.tex doe snot make sense ...
+    if file.tex_type and file.tex_type == "no-document" then
+      log:infof("Skipping %s compilation of non-tex-document %s",extension, file.relative_path)
+      goto endofthiscompilation 
+    end
+
     if file.extension ~= "tex" then
       log:errorf("Can't compile non-tex file %s; SKIPPING, SHOULD PROBABLY NOT HAVE HAPPENED",file.relative_path)
       goto endofthiscompilation 
@@ -220,7 +226,7 @@ local function compile(file, compilers, compile_sequence, only_check)
         local errors = parse_log_file(log_file)  -- gets errors the make4ht-way !
         compile_info.errors = errors
         
-        for i, err in ipairs(errors) do
+        for i, err in ipairs(errors or {}) do
           if i>5 then
             log:errorf("... skipping further errorlog; %d errors found", #errors)
             break
@@ -256,33 +262,19 @@ local function compile(file, compilers, compile_sequence, only_check)
 
     if compiled_file then
       log:debugf("Adding outputfile %s to %s ", compiled_file, file.relative_path)
-      file.output_files[compiled_file] = files.get_fileinfo(compiled_file) 
+      file.output_files[compiled_file] = files.get_fileinfo(compiled_file)
       -- require 'pl.pretty'.dump(file)
     end
-
       
-      table.insert(statuses, compile_info)
+    table.insert(statuses, compile_info)
+    
+    log:infof("Compilation of %s took %.1f seconds (%.20s)", output_file, compilation_time, file.title)
+    
+    lfs.chdir(current_dir)
 
-      log:info(string.format("Compilation of %s took %.1f seconds (%.20s)", output_file, compilation_time, file.title))
-
-      log:tracef("Changing directory back to %s (from %s)",current_dir, file.absolute_dir)
-      lfs.chdir(current_dir)
-
-
-      -- -- NOT IMPLEMENTED ...
-      -- if status == command_metadata.fatal_status then
-      --   log:warning("Skipping further compilations for %s after error",file.relative_file)
-      --   break   -- STOP FURTHER COMPILATION
-      -- end
-
-    log:tracef("Ended compilation %s", extension)
+    log:tracef("Ended compilation %s, chdir back to %s", extension, current_dir)
     ::endofthiscompilation::
   end
-
-  -- if dump_metadata then
-  --   log:debug("Dumping new metadata for ".. relative_file )
-  --   require 'pl.pretty'.dump(metadata)
-  -- end
 
   return statuses
 end
@@ -312,11 +304,14 @@ local function clean(basefile, extensions, only_check)
   local nfiles = 0
   local basename = path.splitext(basefile.absolute_path)
   log:tracef("%s temp files for %s (%s)", (only_check and "Would remove" or "Removing"), basename, basefile.absolute_path)
-  for _, ext in ipairs(extensions) do
-    local filename = basename .. "." .. ext
-    if path.exists(filename) then
-      log:debugf("%s  %s file %s", (only_check and "Would remove" or "Removing") ,ext, filename)
-      if not only_check then os.remove(filename); nfiles = nfiles + 1 end
+
+  for _, infix in ipairs(config.clean_infixes) do
+    for _, ext in ipairs(extensions) do
+      local filename = basename .. infix .. "." .. ext
+      if path.exists(filename) then
+        log:debugf("%s  %12s file %s", (only_check and "Would remove" or "Removing") ,infix.."."..ext, filename)
+        if not only_check then os.remove(filename); nfiles = nfiles + 1 end
+      end
     end
   end
   return nfiles

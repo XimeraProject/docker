@@ -66,6 +66,10 @@ end
 
 logging.set_level(args.loglevel)
 
+
+GLOB_root_dir = path.abspath(".")  -- TODO: find git folder ...?
+-- log:tracef("Setting GLOB_root_dir=%s",GLOB_root_dir)
+
 -- first real argument is the command (bake/frost/serve/...)
 local command = table.remove(args, 1)
 
@@ -211,6 +215,18 @@ config = {
     practicechapter=true, 
     practicesection=true, 
   }, 
+  -- extensions kept by get_files (and thus collected fileinfo from)
+  keep_extensions = {
+    tex  = true,
+    html = true,
+    sty  = true,
+ },
+  clean_infixes = {
+    "",
+    ".make4ht",
+    ".draft",
+    ".handout",
+ },
   -- automatically clean files immediately after each compilation
   -- the commented extensions might cause issues when automatically clean, to be verified
   clean = {
@@ -264,67 +280,50 @@ if args.settings ~= "none" then
   configlib.update_config(args.settings, config)
 end
 
+
+-- Function to get extensions
+local function get_extensions_for_keys(tbl, kys)
+  local extensions = {}
+  for _, key in ipairs(kys) do
+      if tbl[key] and tbl[key].extension then
+          table.insert(extensions, tbl[key].extension)
+      end
+  end
+  return extensions
+end
 if args.compile ~= "none" then
   config.compile_sequence = utils.split(args.compile,',')
-  config.output_formats   = utils.split(args.compile,',')
-  log:info("Set compile_sequence and output_formats to " .. args.compile)
+  config.output_formats   = get_extensions_for_keys(config.compilers, config.compile_sequence)
+  log:infof("Set compile_sequence=%s and output_formats=%s", args.compile, table.concat(config.output_formats,',' ))
 end
 
 config.check = args.check
-
--- local function array_to_set(array)
---   local set = {}
---   for _, v in ipairs(array) do
---       set[v] = true
---   end
---   return set
--- end
-
--- config.include_extensions = array_to_set({
---   "tex",
---   "html",
---   "sty",
---   "pdf",
--- })
-
-
 config.dirs = dirs
 
-
--- collect all metadata / to_be_compiled etc
-
-local tex_files = {}
+--
+-- Prepare processing: collect all metadata / to_be_compiled etc
+--
+local tex_fileinfos = {}
 
 for i,nextarg in ipairs(config.dirs) do 
-
   log:info("Processing argument " .. nextarg)
 
-  local more_tex_files = {}
-  
-  if path.isdir(nextarg) then
-    more_tex_files = files.get_tex_files_with_status(nextarg, config.output_formats, config.compilers)
-  -- an existing TeX-file, but without the extension
-  elseif not path.isfile(nextarg) and path.isfile(nextarg..".tex" ) then    
-    log:trace("Adding .tex extension to file "..nextarg)
-    nextarg = nextarg..".tex"
-  elseif    ( path.isfile(nextarg) and nextarg:match("%.tex$") ~= nil   )     -- an existing TeX-file
-  then
-    local metadata = files.get_fileinfo(nextarg)
-    metadata.needs_compilation = true;
-    log:debug("Explicitly adding tex file "..metadata.filename)
-    more_tex_files = { metadata }
-    to_be_compiled = tex_files
-  elseif  nextarg:match("%.tex$") == nil then
-    log:warning("File "..nextarg.." not a .tex file: SKIPPING")
+  if path.isdir(nextarg) or (  path.isfile(nextarg) and nextarg:match("%.tex$")  )then
+    -- some files might need compilation even if they are not in the args, e.g. _pdf.tex files, or other dependent .tex files
+    for fname, finfo in pairs(files.get_tex_files_with_status(nextarg, config.output_formats, config.compile_sequence)) do
+      log:tracef("Adding to tex_fileinfo:  %s", fname)
+      tex_fileinfos[fname] = finfo
+    end
   else
-    log:warning("File "..nextarg.." not found: SKIPPING")
+    log:warning("File "..nextarg.." not folder or tex-file: SKIPPING")
   end
-
-  table.move(more_tex_files, 1, #more_tex_files, #tex_files+1, tex_files)
 end
 
+-- add files we depend on to the potentially to-be-compiled tex_files
+local tex_files = tablex.values(tex_fileinfos)
 
-log:debugf("Finding dependencies, and sorting files for %d tex_files", #tex_files)
+
+log:debugf("Finding and sorting dependencies for %d tex_files", #tex_files)
 local to_be_compiled = files.sort_dependencies(tex_files, config.force_compilation)
 if #to_be_compiled > 0 then
   log:status(#to_be_compiled.." files need compiling")
@@ -337,11 +336,10 @@ end
   --
 
   if command == "info" then
-    log:info("Got tex files:")
+    log:infof("Got %d tex files:", #tex_files)
     for _,file in ipairs(tex_files) do
         print(file.relative_path)
-
-
+        --print(file.absolute_path)
     end
   end
 
@@ -355,14 +353,15 @@ end
     end
     
     if command == "veryclean" then
-      log:debug("Appending extra extensions")
+      -- log:debug("Appending extra extensions")
       tablex.insertvalues(to_be_cleaned_extensions, config.output_formats)   -- append arrays ...
-      tablex.insertvalues(to_be_cleaned_extensions, { "aux", "toc", "log", "xref", "jax" })   -- append arrays ...
+      tablex.insertvalues(to_be_cleaned_extensions, { "aux", "toc", "log", "dlog", "xref", "jax", "xmjax", "sagetex.sage", "html.failed", "pdf.failed" })   -- append arrays ...
       log:debugf("Appended extra extensions %s", table.concat(to_be_cleaned_extensions, ', '))
     end
     log:status("Cleaning files ", table.concat(to_be_cleaned_extensions, ', '))
     
     for _,file in ipairs(tex_files) do
+      log:tracef("Removing temp files for %s", file.relative_path)
       n_files_deleted = n_files_deleted  + compile.clean(file, to_be_cleaned_extensions, config.check)
     end
 

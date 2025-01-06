@@ -8,41 +8,7 @@ local path = pl.path
 local abspath = pl.path.abspath
 local tablex = pl.tablex
 
---- identify, if the file should be ignored
---- @param entry string tested file path
---- @return boolean should_be_ignored if file should be ignored
-local function ignore_entry(entry)
-  -- files that should be ignored
-  if entry:match("^%.") and not entry:match("^%./") then -- ignore 'hidden' files/dirs (i.e that start with a '.')
-    log:trace("Ignoring file "..entry)
-    return true 
-  end
-  return false
-
-  -- does not work properly, eg. with clean: just add everything...
-  -- local attr = lfs.attributes(entry)
-  -- if attr and attr.mode == "directory" then
-  --   log:trace("Keeping folder "..entry)
-  --   return false
-  -- end
-  -- local extension = entry:match(".%.([^%.]+)$")
-  -- local exts = config.include_extensions
-  -- if exts[extension] then
-  --   log:trace("Keeping file "..entry)
-  --   return false
-  -- end
-  -- log:tracef("Ignoring file %s (%s)",entry, extension)
-
-  -- return true
-end
-
-
---- get file extension 
---- @param relative_path string file path
---- @return string extension
-local function get_extension(relative_path)
-  return relative_path:match("%.([^%.]+)$")
-end
+GLOB_files = {}     -- global variable with all fileinfo collected with get_files  (caching...)
 
 
 
@@ -83,25 +49,22 @@ end
 --- get absolute and relative file path, as well as other file metadata
 --- @param input_path string filename
 --- @return fileinfo
-local function get_fileinfo(input_path, root_folder)
+local function get_fileinfo(input_path)
 
-  -- local relative_path = path.normpath(relpath)     -- resolve potential ../ parts
-  -- dir, entry = path.splitpath(relative_path)
-
-  log:tracef("Getting fileinfo for %s (%s)", input_path, root_folder)
-
-  if ignore_entry(input_path) then
-    log:warningf("Collecting fileinfo for ignored file %s (%s).", input_path, root_folder)
-    -- return 
+  -- caching
+  if GLOB_files[input_path] then
+    log:tracef("Getting cached fileinfo for %s", input_path)
+    return GLOB_files[input_path]
   end
+  
+  log:tracef("Getting fileinfo for %s", input_path)
 
-  if root_folder and string.match(input_path, "^"..root_folder) then
-    input_path = input_path:gsub("^"..root_folder, "")
-  end
+  -- if root_folder and string.match(input_path, "^"..root_folder) then
+  --   input_path = input_path:gsub("^"..root_folder, "")
+  -- end
 
   local relative_path = path.normpath(input_path)     -- resolve potential ../ parts
 
-  
   --- @class fileinfo
   --- @field relative_path  string        relative path of the file (to the root_folder)
   --- @field absolute_path  string        absolute path of the file
@@ -142,6 +105,9 @@ local function get_fileinfo(input_path, root_folder)
     log:debugf("Dumping new fileinfo for %s (%s)", relative_path, fileinfo.modified )
     require 'pl.pretty'.dump(fileinfo)
   end
+
+  GLOB_files[fileinfo.relative_path] = fileinfo
+
   return fileinfo
 end
 
@@ -150,24 +116,43 @@ end
 --- @param dir string path to the directory
 --- @param files? table retrieved files
 --- @return fileinfo[]
-local function get_files(dir, files)
-  dir = dir:gsub("/$", "")    -- remove potential trailing '/'
-  files = files or {}
-  local initial_nfiles = tablex.size(files)
-  for entry in path.dir(dir) do
-    if not ignore_entry(entry) then
-      local fileinfo = get_fileinfo(dir.."/"..entry)
-      local relative_path = fileinfo.relative_path
-      if path.isdir(relative_path) then
-        files = get_files(relative_path, files)
-      elseif path.isfile(relative_path) then
-        files[relative_path] = fileinfo
-      end
-    end
+local function get_files(dir)
+  --dir = dir:gsub("/$", "")    -- remove potential trailing '/'
+  dir = path.normpath(dir)
+  local all_filenames = {}
+
+  if path.isfile(dir)  then
+    all_filenames = { dir }
+    log:tracef("get_files: considering %s", dir)
+  else
+    all_filenames = pl.dir.getallfiles(dir)
+    log:tracef("get_files: considering %d files (for %s)", #all_filenames, dir)
   end
-  log:debugf("get_files returns %4d files in %s", tablex.size(files) - initial_nfiles, dir)
-  --pl.pretty.dump(files)
+
+
+  local files = {}
+
+  for _, filename in ipairs(all_filenames) do
+    -- ext = path.extension(filename)
+
+    if filename:match("^%.") and not filename:match("^%./") then  -- ignore everything starting with a .
+      break
+    end
+
+    ext = filename:match("%.([^%.]+)$")
+
+    -- log:tracef("get_files adding %s (%s)", filename, ext)
+    if config.keep_extensions[ext] then
+      log:tracef("get_files adding %s", filename)
+
+      finfo = get_fileinfo(filename)
+      files[finfo.relative_path] = finfo
+    end
+
+  end
+
   return files
+
 end
 
 
@@ -181,47 +166,36 @@ function filter_tex_files(tbl)
   return result
 end
 
---- add TeX metadata: can it be compiled standalone, is it a ximera or a xourse
---- @param filename string name of the tested TeX file
---- @param linecount number number of lines that should be tested
---- @return boolean is_main true if the file contains \documentclass
-local function add_tex_metadata(file, linecount)
+--- get TeX documentclass ( and thus can it be compiled standalone, is it a ximera or a xourse)
+--- @param file fileinfo the tested TeX file
+--- @param linecount number maximum number of lines that should be tested to find \documentclass
+--- @return string tex_type the documentclass, or 'no-document'
+local function get_tex_type(file, linecount)
   -- we assume that the main TeX file contains \documentclass near beginning of the file 
   linecount = linecount or 30 -- number of lines that will be read
   local filename = file.absolute_path
   local line_no = 0
-  for line in io.lines(filename) do
+
+  local f, msg = io.open(filename, "r")
+  if not f then
+    log:warningf("Could not open file %s: %s",filename, msg)
+    return 'no-document'
+  end
+
+  for line in io.lines(filename) do    -- TODO: test existence of file!
     line_no = line_no + 1
     if line_no > linecount then 
-      file.tex_type='no-document'
-      break 
+      return 'no-document'
     end
+    -- TODO: quid comments ???
     local class_name = line:match("\\documentclass%s*%[[^]]*%]%s*{([^}]+)}")
                     or line:match("\\documentclass%s*{([^}]+)}")
     if class_name then
-      file.tex_type = class_name
-      -- log:debug("Document class: " .. class_name)
-      return true
+      -- log:trace("Document class: " .. class_name)
+      return class_name
     end
   end
-  return false
-end
-
---- get list of compilable TeX files 
---- @param files metadata[] list of TeX files to be tested
---- @return metadata[] main_tex_files list of main TeX files
-local function filter_main_tex_files(files)
-  local t = {}
-  for _, metadata in ipairs(files) do
-    -- if is_main_tex_file(metadata.absolute_path, config.documentclass_lines ) then
-    if add_tex_metadata(metadata, config.documentclass_lines ) then
-      log:debug("Found main TeX file: " .. metadata.absolute_path.. " ("..metadata.tex_type..")" )
-      t[#t+1] = metadata
-    else 
-      log:debug("Not a MAIN TeX file: " .. metadata.absolute_path)
-    end
-  end
-  return t
+  return 'no-document'
 end
 
 --- Detect if the output file needs recompilation
@@ -230,15 +204,19 @@ end
 ---@return boolean
 local function needs_compiling(tex, outfile)
   -- if the output file doesn't exist, it needs recompilation
-  log:tracef("Does %s need compilation? %s",outfile.relative_path, outfile.exists and "It exists" or "It doesn't exist")
+  log:tracef("Does %s need compilation? %s",outfile.relative_path, outfile.exists and "It exists." or "It doesn't exist.")
   if not outfile.exists then return true end
   -- test if the output file is older if the main file or any dependency
   local status = tex.modified > outfile.modified
   if status then 
-    log:tracef("TeX file %s has changed since compilation of %s",tex.relative_path, outfile.relative_path)
+    log:debugf("TeX file %s has changed since compilation of %s",tex.relative_path, outfile.relative_path)
   end
-  for _,subfile in ipairs(tex.depends_on_files or {}) do
-    --  log:tracef("Check modified of subfile %s", subfile.relative_path)
+
+  if not tex.depends_on_files  then
+    log:warningf("File %s does not depend on any files ...?")
+  else
+  for filename, subfile in pairs(tex.depends_on_files or {}) do
+    log:tracef("Check modified of subfile %s", subfile.relative_path)
     if not subfile or not subfile.relative_path or not subfile.modified then
         log:warning("Incomplete data for dependency of %s",tex.relative_path)
         pl.pretty.dump(subfile)
@@ -247,6 +225,7 @@ local function needs_compiling(tex, outfile)
       log:tracef("Dependent file %s has changed since compilation of %s",subfile.relative_path,  outfile.relative_path)
       status = status or subfile.modified > outfile.modified
     end
+  end
   end
   log:tracef("%s %s", outfile.relative_path, status and "needs compilation" or "does not need compilation")
   return status
@@ -258,42 +237,81 @@ end
 local function update_depends_on_files(fileinfo)
   local filename    = fileinfo.absolute_path
   local current_dir = fileinfo.absolute_dir
-  -- local dependecies = config.default_dependencies
-  -- table.move(config.default_dependencies, 1, #(config.default_dependencies), 1, dependecies)
+  local extra_tex_files = {}
 
   for _, dep in ipairs(config.default_dependencies or {}) do
     fileinfo.depends_on_files[dep] = get_fileinfo(dep)
   end
 
-  local f = io.open(filename, "r")
-  if f then
+  local f, msg = io.open(filename, "r")
+  if not f then
+    log:errorf("Could not open file %s: %s",filename, msg)
+    return {}
+  end
+
     local content = f:read("*a")
     f:close()
-    -- remove all comments
+    -- remove all comments   (otherwise also commented commands would be processed!)
     -- content = content:gsub("([^\\])%%.-\n", "%1\n")
     content = content:gsub("%%[^\n]*", "")
     -- loop over all LaTeX commands with arguments
     for command, argument in content:gmatch("\\(%w+)%s*{([^%}]+)}") do
       -- add dependency if the current command is \input like
-      if config.input_commands[command] then
-        local metadata = get_fileinfo(current_dir.."/"..argument)
-        if not argument:match(".tex$") and ( not metadata or not metadata.exists ) then
-          -- the .tex extension may be missing, so try to read it again
-          argument = argument .. ".tex"
-          metadata = get_fileinfo(current_dir.."/"..argument)
+      local metadata = nil    -- should be fileinfo ...
+      local included_file = nil
+      local wanted_extension = nil
+      if command == "dependsonpdf" then
+        -- hack to include PDF (or SVG) eg of cheatsheets (that can/should not converted to HTML)
+        included_file = fileinfo.relative_path:gsub(".tex","_pdf.tex")
+        wanted_extension = "pdf"
+      elseif config.input_commands[command] then
+        -- log:tracef("Consider %s{%s}", command, argument)
+        included_file = path.normpath(current_dir.."/"..argument)     -- remove potential ../ 
+        wanted_extension = "html"    -- because the html will/might be read to get 
+        if not path.isfile(included_file) then
+          if not path.isfile(included_file..".tex") then
+            if not path.isfile(included_file..".sty") then
+              log:warningf("Included file %s not found", included_file)
+            else
+              included_file = included_file..".sty"
+            end
+          else
+            included_file = included_file..".tex"
+          end
         end
-        if metadata and metadata.exists then
-          log:debugf("File %s depends on %s", filename, metadata.absolute_path)
-          fileinfo.depends_on_files[metadata.relative_path] = metadata
-        else
-          log:warningf("%s: No metadata found for %s/%s; not added to dependencies.", filename, current_dir, argument)
-        end
+        log:debugf("Consider included file %s (rel %s)", included_file, path.relpath(included_file, current_dir))
+        included_file = path.relpath(included_file, GLOB_root_dir)      -- make relative path 
+
+      else
+        -- log:tracef("Nothing to process for command %s", command)   -- would log all commands in the .tex file .... !!!
       end
+
+      if included_file then
+
+          local fileinfo = get_fileinfo(included_file)
+
+          log:tracef("Getting tex_file_with_status for %s", included_file)
+          local extra_tex = update_status_tex_file(fileinfo, {wanted_extension}, {wanted_extension} )
+          for fname, finfo in pairs(extra_tex) do
+            metadata = finfo     --- BADBAD: only one 'dependency' properly supported here, but included_file migth itself depend on stuff!!!
+            log:tracef("Adding to tex_fileinfo:  %s (dependend file from %s)", fname, fileinfo.relative_path)
+            extra_tex_files[fname] = finfo
+          end
+        end 
+        if metadata then
+          if metadata.exists then
+            log:debugf("File %s depends on %s", fileinfo.relative_path, metadata.relative_path)
+            fileinfo.depends_on_files[metadata.absolute_path] = metadata
+            fileinfo.depends_on_files[metadata.relative_path] = metadata
+          else
+            log:warningf("File %s depends on non-existing file %s (%s); NOT ADDED TO DEPENDENT FILES", fileinfo.relative_path, metadata.relative_path, metadata.absolute_path)
+          end
+      end  -- included_file
+      -- next command ...
     end
-  end
-  log:debugf("tex_dependencies found %d dependencies for %s", tablex.size(fileinfo.depends_on_files), filename)
-  --log:tracef("%s has dependencies %s", filename, table.concat(dependecies,', '))
-  return
+  --log:debugf("tex_dependencies found %d dependencies for %s", tablex.size(fileinfo.depends_on_files), filename)
+  log:tracef("%s has dependencies %s", filename, table.concat(fileinfo.depends_on_files,', '))
+  return extra_tex_files
 end
 
 
@@ -307,8 +325,7 @@ local function check_output_files(metadata, extensions, compilers)
   local tex_file = metadata.filename
   local needs_compilation = false
   for _, extension in ipairs(extensions) do
-    local html_file = get_fileinfo(metadata.relative_path:gsub("tex$", extension))
-    -- local html_file = get_metadata(metadata.absolute_dir, tex_file:gsub("tex$", extension))
+    local html_file = get_fileinfo(metadata.relative_path:gsub("tex$", extension))     -- could also be a pdf_file ...!!!
     -- detect if the HTML file needs recompilation
     local status = needs_compiling(metadata, html_file)
     -- for some extensions (like sagetex.sage), we need to check if the output file exists 
@@ -319,7 +336,7 @@ local function check_output_files(metadata, extensions, compilers)
       status = false
     end
     needs_compilation = needs_compilation or status
-    log:debugf("%-12s %8s: %s",extension,  status and 'COMPILE' or 'OK', html_file.absolute_path)
+    log:debugf("%-12s %18s: %s",extension,  status and 'COMPILE' or 'OK', html_file.absolute_path)
     --- @class output_file 
     --- @field needs_compilation boolean true if the file needs compilation
     --- @field metadata metadata of the output file 
@@ -362,8 +379,9 @@ local function sort_dependencies(tex_files, force_compilation)
   -- now add edges to included files which needs to be recompiled
   for _, metadata in pairs(used) do
     local current_name = metadata.absolute_path
-    log:tracef("Get used = %s (%s)",current_name,metadata.dependecies)
-    for _, child in ipairs(metadata.dependecies or {}) do
+    log:tracef("Get used = %s (%s)",current_name, tablex.keys(metadata.depends_on_files))
+    for filename, child in pairs(metadata.depends_on_files or {}) do
+    -- for _, child in ipairs(metadata.dependecies or {}) do
       local name = child.absolute_path
       log:tracef("Get child = %s",name)
       -- add edge only to files added in the first run, because only these needs compilation
@@ -393,41 +411,70 @@ local function sort_dependencies(tex_files, force_compilation)
   return to_be_compiled
 end
 
+
 --- find TeX files that needs to be compiled in the directory tree
 --- @param dir string root directory where we should find TeX files
 --- @return metadata[] tex_files list of all TeX files found in the directory tree
-local function get_tex_files_with_status(dir, output_formats, compilers)
-  log:debugf("Getting tex files in %s (for %s and %s)", dir, table.concat(output_formats,', '), table.concat(compilers,', '))
-  local files = get_files(dir)
-  local only_tex_files = filter_tex_files(files)
-  local tex_files = filter_main_tex_files(only_tex_files)
-  -- now check which output files needs a compilation
-  for _, metadata in ipairs(tex_files) do
-    -- get list of included TeX files
-    update_depends_on_files(metadata)
-    -- check for the need compilation
-    local status, output_files = check_output_files(metadata, output_formats, compilers)
-    metadata.needs_compilation = status
-    metadata.output_files = output_files
-    -- try to find the TeX4ht .cfg file
-    -- to speed things up, we will find it only for files that needs a compilation
-    if metadata.needs_compilation then
-      -- search in the current work dir first, then in  the directory of the TeX file, and project root
-      -- TODO: check use of 'config.dir' !!!
-      metadata.config_file = find_config(config.config_file, {lfs.currentdir(), metadata.absolute_dir, abspath(dir)})
-      if metadata.config_file ~= config.config_file then log:debug("Use config file: " .. metadata.config_file) end
-    end
-    if status then
-      log:infof("%-12s %8s: %s", metadata.extension,  status and 'CHANGED' or 'OK', metadata.absolute_path)
-    else
-      log:debugf("%-12s %8s: %s", metadata.extension,  status and 'CHANGED' or 'OK', metadata.absolute_path)
-    end
-  end
+function update_status_tex_file(metadata, output_formats, compilers)
+    log:tracef("update_status_tex_file %s (for output_formats=%s and compilers=%s)", metadata.relative_path, table.concat(output_formats,', '), table.concat(compilers,', '))
 
-  -- SKIPPED: create ordered list of files that needs to be compiled
-  return tex_files
+    local tex_fileinfos = {}
+    metadata.tex_type = get_tex_type(metadata, config.documentclass_lines)     -- ximera, xourse, no-document 
+    -- update metadata with a list of included TeX files, and store it in tex_fileinfos
+
+    tex_fileinfos[metadata.relative_path] = metadata
+
+    if metadata.tex_type == "no-document" then
+      log:tracef("%s has no documentclass; skipping dependencies/output etc", metadata.relative_path)
+    else
+
+      for fname, finfo in pairs(update_depends_on_files(metadata)) do
+        log:tracef("Adding to tex_fileinfo:  %s (dependend file of %s)", fname, metadata.relative_path)
+        tex_fileinfos[fname] = finfo
+      end
+      -- check for the need compilation
+      local status, output_files = check_output_files(metadata, output_formats, compilers)
+      metadata.needs_compilation = status
+      metadata.output_files = output_files
+      -- try to find the TeX4ht .cfg file
+      -- to speed things up, we will find it only for files that needs a compilation
+      if metadata.needs_compilation then
+        -- search in the current work dir first, then in  the directory of the TeX file, and project root
+        -- TODO: check use of 'config.dir' !!!
+        -- metadata.config_file = find_config(config.config_file, {lfs.currentdir(), metadata.absolute_dir, abspath(dir)})
+        metadata.config_file = find_config(config.config_file, {lfs.currentdir(), metadata.absolute_dir, abspath(dir or ".")})
+        if metadata.config_file ~= config.config_file then log:debug("Use config file: " .. metadata.config_file) end
+      end
+      if status then
+        log:infof("%-12s %18s: %s", metadata.extension,  status and 'NEEDS_COMPILATION' or 'OK', metadata.relative_path)
+      else
+        log:debugf("%-12s %18s: %s", metadata.extension,  status and 'NEEDS_COMPILATION' or 'OK', metadata.relative_path)
+      end
+    end
+    return tex_fileinfos
 end
 
+--- find TeX files that needs to be compiled in the directory tree
+--- @param dir string root directory where we should find TeX files
+--- @return metadata[] tex_files list of all TeX files found in the directory tree
+function get_tex_files_with_status(dir, output_formats, compilers)
+  log:debugf("Getting tex files in %s (for output_formats=%s and compilers=%s)", dir, table.concat(output_formats,', '), table.concat(compilers,', '))
+  local files = get_files(dir, {})
+  local tex_files = filter_tex_files(files)
+
+  local tex_fileinfos = {}
+  -- now check which output files needs a compilation
+  for _, metadata in ipairs(tex_files) do
+    for fname, finfo in pairs(update_status_tex_file(metadata, output_formats, compilers)) do
+      log:tracef("Adding to tex_fileinfo:  %s", fname)
+      tex_fileinfos[fname] = finfo
+    end
+    
+  end
+
+  -- -- SKIPPED: create ordered list of files that needs to be compiled
+  return tex_fileinfos
+end
 
 M.get_tex_files_with_status = get_tex_files_with_status
 M.sort_dependencies = sort_dependencies
