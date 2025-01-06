@@ -420,12 +420,12 @@ if command == "bake" or command == "compilePdf" or command ==  "compile" then
   if command == "compilePdf" then
     log:info("Compile only PDF")
     config.compile_sequence = { "pdf" }
-    config.output_formats   = get_extensions_for_keys(config.compilers, config.compile_sequence)
+    config.output_formats   = get_extensions_for_compilers(config.compilers, config.compile_sequence)
   end
   if command == "compile" then
     log:info("Compile only HTML")
     config.compile_sequence = { "draft.html" }
-    config.output_formats   = get_extensions_for_keys(config.compilers, config.compile_sequence)
+    config.output_formats   = get_extensions_for_compilers(config.compilers, config.compile_sequence)
   end
   local all_statuses = {}
   if #to_be_compiled == 0 then
