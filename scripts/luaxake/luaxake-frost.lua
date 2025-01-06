@@ -299,14 +299,14 @@ local function serve()
 
     local tree_oid, tag_oid, tagName = most_recent_publication:match("([^%s]+) ([^%s]+) ([^%s]+)")
 
-    log:infof("Publishing  %s  (tree:%s tag:%s) ", tagName, tree_oid, tag_oid)
+    log:debugf("Publishing  %s  (tree:%s tag:%s) ", tagName, tree_oid, tag_oid)
     
-    local ret, output = osExecute("git push -f ximera "..tagName)
+    local ret, output = osExecute("git push  ximera "..tagName)
     if ret > 0 then
         log:tracef("Could not push to 'ximera' target: %s",output)
         return ret,output
     end
-    local ret, output =  osExecute("git push -f ximera "..tag_oid..":refs/heads/master")     -- HACK ???
+    local ret, output =  osExecute("git push ximera "..tag_oid..":refs/heads/master")     -- HACK ???
     if ret > 0 then
         log:tracef("Could not push refs to 'ximera' target: %s",output)
         return ret,output
