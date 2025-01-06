@@ -118,6 +118,7 @@ end
 --- @return fileinfo[]
 local function get_files(dir)
   --dir = dir:gsub("/$", "")    -- remove potential trailing '/'
+  dir = dir:gsub("^./", "")    -- remove potential leading './'     -- it confuses skippingb hidden .xxx files/folders
   dir = path.normpath(dir)
   local all_filenames = {}
 
@@ -135,8 +136,10 @@ local function get_files(dir)
   for _, filename in ipairs(all_filenames) do
     -- ext = path.extension(filename)
 
-    if filename:match("^%.") and not filename:match("^%./") then  -- ignore everything starting with a .
-      break
+    -- local basename = filename:match(".*/(.*)$") or filename  -- Extract filename from path
+    if filename:match("/%.") then  -- ignore every file/folder starting with a . (ie, containing xxx/.yyy )
+      -- log:tracef("get_files skips %s", filename)
+      goto next_file
     end
 
     ext = filename:match("%.([^%.]+)$")
@@ -149,6 +152,7 @@ local function get_files(dir)
       files[finfo.relative_path] = finfo
     end
 
+    ::next_file::
   end
 
   return files

@@ -16,35 +16,12 @@ local log = logging.new("compile")
 local function parse_log_file(filename)
   local f = io.open(filename, "r")
   if not f then 
-    log:error("Cannot open log file: " .. filename)
+    log:warningf("Cannot open log file %s; SKIPPING parsing logfile for errors ", filename)
     return nil 
   end
   local content = f:read("*a")
   f:close()
   return error_logparser.parse(content)
-end
-
-local function copy_table(tbl)
-  local t = {}
-  for k,v in pairs(tbl) do 
-    if type(v) == "table" then
-      t[k] = copy_table(v)
-    else
-      t[k] = v 
-    end
-  end
-  return t
-end
-
--- Function to find the first table with a given key/value using Penlight
-local function find_entry(array, key, value)
-  for _, entry in ipairs(array) do
-      if entry[key] == value then
-
-          return entry  -- Return the first matching entry
-      end
-  end
-  return nil  -- Return nil if no match is found
 end
 
 --
@@ -78,13 +55,8 @@ function post_process_pdf(src_filename, file, cmd_meta, root_dir)
     frost.osExecute("pdf2svg " .. file.absolute_path:gsub(".tex",".pdf") .. " " .. file.absolute_path:gsub(".tex",".svg"))
   end
 
-  return 1, tgt
+  return nil, tgt
 end
-
---
---
---
-
 
 --- run a complete compile-cycle on a given file
 --- 
@@ -103,6 +75,9 @@ local function compile(file, compilers, compile_sequence, only_check)
   -- NOTE: extension is a bad name, it's rather  'compiler'
   for _, extension in ipairs(compile_sequence) do
     local command_metadata = compilers[extension]
+    local first_try = true
+
+    ::another_try::     -- jump here to try compilation once more ... (eg to get title right !)
 
     if not command_metadata then
       log:errorf("No compiler defined for %s (%s); SKIPPING",extension,file.relative_path)
@@ -122,6 +97,7 @@ local function compile(file, compilers, compile_sequence, only_check)
     if extension:match("html$") and ( file.relative_path:match("_pdf.tex$") or file.relative_path:match("_beamer.tex$") ) then
       log:infof("Skipping HTML compilation of pdf-only file %s",file.relative_path) 
 
+      -- create/update a dummy outputfile to mark this file 'uptodate'
       local filename = file.absolute_path:gsub(".tex$",".html")
       local file, err = io.open(filename, "r")
     
@@ -132,17 +108,13 @@ local function compile(file, compilers, compile_sequence, only_check)
       else
           -- File doesn't exist, create a new one
           file, err = io.open(filename, "w")
-          if file then
-              file:close()
-          else
-              log:infof("Failed to fix dummy htmlfile %s: %s",filename,err)
+          if file then file:close()
+          else         log:infof("Failed to fix dummy htmlfile %s: %s",filename,err)
           end
       end
-
       goto endofthiscompilation 
     end
   
-
     --
     -- WARNING: (tex-)compilation HAS TO START IN THE SUBFOLDER !!!
     --   !!! CHDIR  might confuse all relative paths !!!!
@@ -152,7 +124,7 @@ local function compile(file, compilers, compile_sequence, only_check)
     lfs.chdir(file.absolute_dir)
 
 
-    local infix = ""
+    local infix = ""    -- used for compilation-variations, eg 'handout' of 'make4ht'/'draft'
     if command_metadata.infix and command_metadata.infix ~= "" then
       infix = command_metadata.infix.."."
     end
@@ -161,14 +133,13 @@ local function compile(file, compilers, compile_sequence, only_check)
 
     -- sometimes compiler wants to check for the output file (like for sagetex.sage),
     if command_metadata.check_file and not path.exists(output_file) then
-      log:debugf("Skipping compilation because 'check_file' and file %s does not exist",output_file)
+      log:debugf("Skipping compilation because of 'check_file', and file %s does not exist",output_file)
       goto endofthiscompilation  -- nice: a goto-statement !!!
     end
     
-    -- if not output_file.needs_compilation then
-    --   log:debugf("Skipping compilation file %s is uptodate",output_file)
-    --   goto endofthiscompilation  -- nice: a goto-statement !!!
-    -- end
+    if not output_file.needs_compilation then
+      log:debugf("Mmm, compiling file %s which seemed to be uptodate.",output_file)
+    end
 
       -- replace placeholders like @{filename} with the corresponding keys (from the metadata table, or config)
       local command = command_metadata.command
@@ -185,7 +156,6 @@ local function compile(file, compilers, compile_sequence, only_check)
         log:info("Running in check-modus: SKIPPING " .. command )
       else
         log:info("Running " .. command )
-
 
         -- we reuse this file from make4ht's mkutils.lua
         local f = io.popen(command, "r")
@@ -246,15 +216,34 @@ local function compile(file, compilers, compile_sequence, only_check)
       goto endofthiscompilation  -- nice: a goto-statement !!!
     end
 
-    if command_metadata.post_command then
+    if not command_metadata.post_command then
+      -- in case no postprocessing: 
+      compiled_file = output_file  
+    else
       local cmd = command_metadata.post_command
       log:infof("Postprocessing: %s", cmd)
       -- call the post_command
       local status, msg = _G[cmd](output_file, file, command_metadata, current_dir)     -- lua way of calling the function whose name is in 'cmd'
       
-      if not status then
+      if status then
+
+        -- HACK: to get a title in the html file, a second compilation is needed...
+        if extension == "draft.html" and status == 'RETRY_COMPILATION' and first_try
+        then
+          log:infof("Retrying compilation for %s", file.relative_path)
+          first_try = false
+          goto another_try
+        elseif extension == "draft.html" and status == 'RETRY_COMPILATION' then
+          log:warningf("Retrying did not solve the problem for %s", file.relative_path)
+        else
+          log:tracef("Non-retryable status %s for %s of %s", status, extension, file.relative_path)
+        end
+
+
         log:errorf("Error in postprocessing: %s", msg)
         compiled_file = nil
+        compile_info.post_status = status
+        compile_info.post_message = msg
       else 
         compiled_file = msg
       end
@@ -299,18 +288,20 @@ end
 ---@param basefile fileinfo 
 ---@param extensions table    list of extensions of files to be removed
 ---@return  number nfiles     number of files removed
-local function clean(basefile, extensions, only_check)
+local function clean(basefile, extensions, infixes, only_check)
   only_check = only_check or false
   local nfiles = 0
   local basename = path.splitext(basefile.absolute_path)
-  log:tracef("%s temp files for %s (%s)", (only_check and "Would remove" or "Removing"), basename, basefile.absolute_path)
+  log:tracef("%s the temp files for %s (%s)", (only_check and "Would remove" or "Removing"), basename, basefile.absolute_path)
 
-  for _, infix in ipairs(config.clean_infixes) do
+  for _, infix in ipairs(infixes) do
     for _, ext in ipairs(extensions) do
       local filename = basename .. infix .. "." .. ext
       if path.exists(filename) then
-        log:debugf("%s  %12s file %s", (only_check and "Would remove" or "Removing") ,infix.."."..ext, filename)
+        log:debugf("%s  %13s file %s", (only_check and "Would remove" or "Removing") ,infix.."."..ext, filename)
         if not only_check then os.remove(filename); nfiles = nfiles + 1 end
+      -- else
+      --   log:tracef("No file %s present", filename)
       end
     end
   end

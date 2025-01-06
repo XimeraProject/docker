@@ -54,36 +54,6 @@ function getRelativePath(base, targ)
   return table.concat(relativeParts, "/")
 end
 
--- Function to create a backup copy of a file
-local function backup_file(original_filename, extension)
-  -- Determine the backup filename (e.g., "file.txt" -> "file.txt.bak")
-  local backup_filename = original_filename .. "." .. (extension or "ORG")
-
-  -- Open the original file for reading in binary mode
-  local original_file = io.open(original_filename, "rb")
-  if not original_file then
-      log:error("backup_file: Could not open the original file "..original_filename.." for reading.")
-      return false
-  end
-
-  -- Read the entire contents of the original file
-  local content = original_file:read("*all")
-  original_file:close()
-
-  -- Open the backup file for writing in binary mode
-  local backup_file = io.open(backup_filename, "wb")
-  if not backup_file then
-      log:error("backup_file: Could not open the backup file"..backup_filename.." for writing.")
-      return false
-  end
-
-  -- Write the content to the backup file
-  backup_file:write(content)
-  backup_file:close()
-
-  log:debug("Backup created: " .. backup_filename)
-  return true
-end
 
 local html_cache = {}
 
@@ -93,7 +63,7 @@ local html_cache = {}
 ---@return string? error_message
 local function load_html(filename)
   -- cache DOM objects
-  if html_cache[filename] then 
+  if false and html_cache[filename] then    -- does not work with RECOMPILE ...
     log:trace("returning cached dom ")
     -- require 'pl.pretty'.dump(domobject.html_parse(content))
     return html_cache[filename]
@@ -319,73 +289,122 @@ local function get_extension(relative_path)
 end
 
 
+
 --- Get all files 'associated' with a given file (i.e. images)
 ---@param dom DOM_Object
 ---@param file fileinfo
----@return table
+---@return ret , table
 local function get_associated_files(dom, file)
-  log:debug("get_associated_files for "..file.filename)
+  log:tracef("get_associated_files for %s", file.filename)
   -- pl.pretty.dump(file)
 
   if not dom then
-    log:warning("Passed nil to get_associated_files for %s...? No files returned.", file.filename or "<NO__FILE>")
-    return {}
+    log:tracef("Passed nil to get_associated_files for %s...? No files returned.", file.filename or "<NO__FILE>")
+    return 1, "Passed nil to get_associated_files for " ..  file.filename or "<NO__FILE>"
   end
 
   local ass_files = {}
+  local ass_errors = {}
   local isXimeraFile = dom:query_selector("meta[name='ximera']")[1]
   if not isXimeraFile then 
       log:warning(file.filename.." is not a ximera file (no meta[name='ximera' tag])")
   end
 
-  local title, abstract = read_title_and_abstract(dom)
-  file.title = title or ""
-  file.abstract = abstract or ""
-
-  log:debug(string.format("Added title '%20.20s...' and abstract '%.10s...'", title, abstract))
-
-
   -- Add images 
   for _, img_el in ipairs(dom:query_selector("img") ) do
     local src = img_el:get_attribute("src")
+    --  log:tracef("Found img %s in %s (%s)", src, file.absolute_path, file.relative_path )
     src = (file.relative_dir or ".").."/"..src
-    log:debug("Found img "..src)
+    log:debugf("Found img %s in %s", src, file.absolute_path )
 
-    if not path.exists(src) then
-      log:error("Image file "..src.." does not exist")
-    end
-    if path.getsize(src) == 0 then
-      log:error("Image file "..src.." has size zero")
-    end
+    if not path.exists(GLOB_root_dir .. "/" .. src) then    -- BADBAD: this might got processed after chdir in compile ....!
+      log:errorf("Image file %s does not exist (%s)", src, GLOB_root_dir .. "/" .. src)
+      ass_errors[#ass_errors+1] = src .. " does not exist"
+      goto next_image
 
-    local u = url.parse(src)
+    end
+    if path.getsize(GLOB_root_dir .. "/" .. src) == 0 then
+      log:errorf("Image file %s has size zero", GLOB_root_dir .. "/" .. src)
+      ass_errors[#ass_errors+1] = src .. " has size zero"
+      goto next_image
+    end
     
     ass_files[#ass_files+1] = src
     
-    if false and get_extension(u.path) == "svg"
-    then
-      local png  = u.path:gsub(".svg$", ".png")
-      log:debug("also adding  "..png)
-      ass_files[#ass_files+1] = png
-    end
+    -- local u = url.parse(src)
+    -- if false and get_extension(u.path) == "svg"
+    -- then
+    --   local png  = u.path:gsub(".svg$", ".png")
+    --   log:debug("also adding  "..png)
+    --   ass_files[#ass_files+1] = png
+    -- end
   
+    ::next_image::
   end
-  log:debug("get_associated_files done "..file.filename)
 
-  return ass_files
+  if #ass_errors >  0 then
+    log:warningf("Got %d errors for associateds file (images) of %s", #ass_errors, file.relative_path)
+    table.insert(ass_errors,1,"")    -- HACK to get also the first error on a newline ...
+    return 1, "Error(s):".. table.concat(ass_errors, "\n ERROR  ->")
+  else 
+    log:debugf("Got %d associated files (images) for %s", #ass_files, file.relative_path)
+    return nil, ass_files
+  end
+end
+
+
+
+--- Update 'fileinfo' of html file 
+---@param fileinfo fileinfo
+---@param dom? DOM_Object
+---@return ret, msg
+local function update_html_fileinfo(fileinfo, dom)
+  log:tracef("update_html_fileinfo for %s", fileinfo.filename)
+
+  local html_file = fileinfo.relative_path
+
+  local msg
+
+  -- if dom not passed, get it ...
+  if not dom then
+    dom, msg = load_html(html_file)
+    if not dom then 
+        log:tracef("No dom for %s (%s). SKIPPING", html_file, msg)
+        return 1, "No dom loaded for " ..  html_file .. ": " .. msg 
+    end
+  end
+
+-- collect info  (for frosting...)
+  fileinfo.labels = get_labels(dom)
+  
+  -- check if e.g. images can be found...
+  local ret, associated_files = get_associated_files(dom, fileinfo)
+  
+  if ret then
+    log:tracef("ERROR: Could not get associated files (images) for %s: %s", html_file, associated_files )
+    return ret, associated_files
+  end
+  
+  fileinfo.associated_files = associated_files
+
+  local title, abstract = read_title_and_abstract(dom)
+  fileinfo.title = title or ""
+  fileinfo.abstract = abstract or ""
+
+  return nil,"OK"
 end
 
 --- Save DOM to file
 ---@param dom DOM_Object
 ---@param filename string
 local function save_html(dom, filename)
-  local f = io.open(filename, "w")
+  local f, err = io.open(filename, "w")
   if not f then
-    return nil, "Cannot save updated HTML: " .. (filename or "")
+    return 1, "Cannot save updated HTML to " .. (filename or "" .. ": ".. err) 
   end
   f:write(dom:serialize())
   f:close()
-  return true, filename
+  return nil, filename
 end
 
 
@@ -402,20 +421,31 @@ local function post_process_html(src, file, cmd_meta, root_dir)
   
   local dom, msg = load_html(src)
   if not dom then return false, msg end
+  
+  local ret, msg =  update_html_fileinfo(file, dom)     -- not really 'post-processing', but implicit checking-of-gebnerated-images
+  if ret then return ret, msg end
+
+  if not file.title or file.title == "" then
+    log:warningf("No title found in %s; recompiling once more might solve this ...", file.relative_path)
+    return "RETRY_COMPILATION", "No title generated for ".. file.relative_path
+  end
+
+  
   remove_empty_paragraphs(dom)
   -- add_dependencies(dom, file)    -- IS THIS NEEDED???
+
 
   for _, mjax in ipairs(dom:query_selector(".mathjax-inline, .mathjax-block")) do
     local mtext = mjax:get_text()
     mtext = mtext:gsub("\\begin%s*{", "\\begin{")
     mtext = mtext:gsub("\\end%s*{", "\\end{")
     if mtext ~= mjax:get_text() then
-      log:tracef("Set mtext to %s",mtext)
+      log:tracef("Set mtext to %30.30s.", mtext:gsub("[\n \t]+"," "))
       mjax.textContent = mtext
     end
   end
 
-  log:debug("Check if .jax file is present") 
+  log:debug("Check if .xmjax file is present") 
   local jax_file = src:gsub(".html$", ".xmjax")
   if not path.exists(jax_file) then
     log:warning("Strange: no JAX file with extra LaTeX commands for MathJAX")
@@ -424,7 +454,7 @@ local function post_process_html(src, file, cmd_meta, root_dir)
 
   if jax_file then
 
-      local preambles = dom:query_selector("div.preamble")
+    local preambles = dom:query_selector("div.preamble")
       
     if #preambles == 0 then
       -- Should not happen ...
@@ -466,9 +496,6 @@ local function post_process_html(src, file, cmd_meta, root_dir)
 
   end
 
-  local title, abstract = read_title_and_abstract(dom)
-  file.title = title or ""
-  file.abstract = abstract or ""
   
   if is_xourse(dom, src) then
     transform_xourse(dom, file)
@@ -503,8 +530,8 @@ local function post_process_html(src, file, cmd_meta, root_dir)
 end
 
 M.post_process_html = post_process_html
-M.load_html = load_html
-M.get_labels = get_labels
-M.get_associated_files = get_associated_files
+-- M.load_html = load_html
+-- M.get_labels = get_labels
+M.update_html_fileinfo = update_html_fileinfo
 
 return M

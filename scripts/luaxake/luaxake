@@ -26,7 +26,7 @@ local html    = require "luaxake-transform-html"
 local option_text = [[ 
 Luaxake: build system for Ximera documents
 Usage: 
-$ luaxake [command dirs] 
+$ luaxake [command dirs]
 
 Options: 
 -h,--help                            Print help message
@@ -35,13 +35,13 @@ Options:
 -v,--version                         Version info
 -f,--force                           Recompile anyway
 -C,--compile   (default none)        Compile sequence (default 'pdf,html', or as set in settings)
---check                              Check, no cleaning/compiling
+--check                              Only check, no actual compiling/cleaning
+--noclean                            Keep all temp files
 --config       (default ximera.cfg)  TeX4ht config file
-
 
 Possible commands:
  bake
- name               -- NOT YET IMPLEMENTED HERE: see xmlatex !!!
+ name               -- NOT (YET) IMPLEMENTED HERE: see xmlatex !!!
  frost
  serve
  clean / veryclean  -- to be changed/improved
@@ -114,20 +114,16 @@ end
 --- @field process_html? boolean run HTML post-processing
 
 --- @class config
---- @field output_formats      [string] list of output format extensions
---- @field documentclass_lines number   on how many lines in TeX files we should try to look for \documentclass
---- @field compilers           {string: compiler}
 --- @field compile_sequence    [string] sequence  of compiler names to be executed
+--- @field output_formats      [string] list of output format extensions, calculated from compile_sequence
+--- @field compilers           {string: compiler}  table with available 'compilers'
 --- @field clean               [string] list of extensions of temp files to be removed after the compilation
 --- @field config_file         string   TeX4ht config file 
+--- @field documentclass_lines number   on how many lines in TeX files we should try to look for \documentclass
 
 config = {
-  -- dump_fileinfo = ".html",     -- for debugging: dumps the 'fileinfo' of matching files
-  -- list of outputs ( and extensions )
-  output_formats = {"html", "pdf", "handout.pdf"},
-  -- output_formats = {"make4ht.html", "pdf", "handout.pdf"},
-  -- output_formats = {"html", "pdf", "sagetex.sage"},    -- TODO: check/implement sage
-  compile_sequence = {"pdf", "make4ht.html", "handout.pdf"},
+  compile_sequence = {"pdf", "draft.html"},
+  -- compile_sequence = {"pdf", "make4ht.html", "handout.pdf"},
   -- compile_sequence = {"pdf", "sagetex.sage", "pdf", "html"},
   -- see infra --   default_dependencies = { "xmPreamble.tex" },     -- add here e.g. xmPreamble, ximera.cls, ...
   compilers = {
@@ -152,14 +148,13 @@ config = {
       post_command = 'post_process_pdf',
       download_folder = 'ximera-downloads/handouts',
     },
-    -- 20241217: use make4ht.html (this keeps logfiles etc from being overwritten ...)!
+    -- 20241217: better use draft.html (this keeps logfiles etc from being overwritten ...)!
     html = {
       -- command = "make4ht -f html5+dvisvgm_hashes -c @{config_file} -sm draft @{filename}",
       -- command = "make4ht -c @{config_file} -f html5+dvisvgm_hashes -s @{make4ht_mode} -a debug @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       command = "make4ht -l -c @{config_file} -f html5+dvisvgm_hashes          -j @{basename}.make4ht -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css,info,tikz+' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
-      process_html = false,
       post_command = 'post_process_html',
       extension = "html",
       infix = "make4ht" ,
@@ -168,7 +163,6 @@ config = {
       command = "make4ht -l -c @{config_file} -f html5+dvisvgm_hashes          -j @{basename}.make4ht -s @{make4ht_extraoptions} @{filename} 'svg,htex4ht,mathjax,-css' '' '' '--interaction=nonstopmode -shell-escape -file-line-error'",
       check_log = true, -- check log
       status = 0, -- check that the latex command return 0
-      process_html = false,
       post_command = 'post_process_html',
       extension = "html",
       infix = "make4ht" ,
@@ -204,7 +198,7 @@ config = {
       status = 0, -- check that the command returns 0
     },
   },
-  -- used for dependency-checking in .tex files
+  -- TeX macro's to use for dependency-checking in .tex files
   input_commands = {
     input=true, 
     include=true, 
@@ -215,12 +209,13 @@ config = {
     practicechapter=true, 
     practicesection=true, 
   }, 
-  -- extensions kept by get_files (and thus collected fileinfo from)
+  -- extensions to be kept by get_files (and thus for which fileinfo is collected)
   keep_extensions = {
     tex  = true,
     html = true,
     sty  = true,
  },
+ -- list of 'infixes' to be cleaned by default
   clean_infixes = {
     "",
     ".make4ht",
@@ -228,8 +223,8 @@ config = {
     ".handout",
  },
   -- automatically clean files immediately after each compilation
-  -- the commented extensions might cause issues when automatically clean, to be verified
-  clean = {
+  -- the commented extensions might cause issues when automatically cleaned, as they may be needed for the next compilation
+  clean_extensions = {
     -- "aux",
     "4ct",
     "4tc",
@@ -252,10 +247,12 @@ config = {
     "cb",
     "cb2",
   },
+  documentclass_lines = 30,
+  -- for debugging: dumps the 'fileinfo' of matching files
   -- make4ht_loglevel = "",
   make4ht_extraoptions= "",
   -- number of lines in tex files where we should look for \documentclass
-  documentclass_lines = 30,
+  -- dump_fileinfo = ".html",     
 }
 
 -- set/add potential default dependencies
@@ -266,9 +263,13 @@ else
   config.default_dependencies = {}
 end
 
+-- Store all args in config   (so that all args can also be specified in the config?)
+config.dirs = dirs
+if args.check   then config.check = args.check end
+if args.noclean then config.noclean = args.noclean end
+if args.force   then config.force_compilation = args.force end;
 
 config.config_file = args.config
-config.force_compilation = args.force
 if config.config_file ~= "ximera.cfg" then
   log:warning("Using non-default config file " .. config.config_file)
 end
@@ -281,8 +282,8 @@ if args.settings ~= "none" then
 end
 
 
--- Function to get extensions
-local function get_extensions_for_keys(tbl, kys)
+-- Function to get extensions for array of compilers
+local function get_extensions_for_compilers(tbl, kys)
   local extensions = {}
   for _, key in ipairs(kys) do
       if tbl[key] and tbl[key].extension then
@@ -291,14 +292,35 @@ local function get_extensions_for_keys(tbl, kys)
   end
   return extensions
 end
+-- Function to get infixes for array of compilers
+local function get_infixes_for_compilers(tbl, kys)
+  local infixes = {}
+  for _, key in ipairs(kys) do
+      if tbl[key] and tbl[key].infix then
+        if tbl[key].infix == "" then
+          table.insert(infixes, tbl[key].infix)
+        else   -- prepend the . !!!
+          table.insert(infixes, "."..tbl[key].infix)
+        end
+      end
+  end
+  return infixes
+end
 if args.compile ~= "none" then
   config.compile_sequence = utils.split(args.compile,',')
-  config.output_formats   = get_extensions_for_keys(config.compilers, config.compile_sequence)
-  log:infof("Set compile_sequence=%s and output_formats=%s", args.compile, table.concat(config.output_formats,',' ))
 end
 
-config.check = args.check
-config.dirs = dirs
+for _, compiler in ipairs(config.compile_sequence) do
+  if not config.compilers[compiler] then
+    log:fatalf("Unknown compiler %s (should be in %s)", compiler, table.concat(tablex.keys(config.compilers),', '))
+    os.exit(1)
+  end
+end
+
+
+config.clean_infixes    = get_infixes_for_compilers(config.compilers, config.compile_sequence)
+config.output_formats   = get_extensions_for_compilers(config.compilers, config.compile_sequence)
+log:infof("Set compile_sequence=%s (and output_formats=%s)", table.concat(config.compile_sequence,','), table.concat(config.output_formats,','))
 
 --
 -- Prepare processing: collect all metadata / to_be_compiled etc
@@ -308,7 +330,7 @@ local tex_fileinfos = {}
 for i,nextarg in ipairs(config.dirs) do 
   log:info("Processing argument " .. nextarg)
 
-  if path.isdir(nextarg) or (  path.isfile(nextarg) and nextarg:match("%.tex$")  )then
+  if path.isdir(nextarg) or ( path.isfile(nextarg) and nextarg:match("%.tex$")  )then
     -- some files might need compilation even if they are not in the args, e.g. _pdf.tex files, or other dependent .tex files
     for fname, finfo in pairs(files.get_tex_files_with_status(nextarg, config.output_formats, config.compile_sequence)) do
       log:tracef("Adding to tex_fileinfo:  %s", fname)
@@ -319,14 +341,31 @@ for i,nextarg in ipairs(config.dirs) do
   end
 end
 
--- add files we depend on to the potentially to-be-compiled tex_files
+-- add extra files we depend on to the potentially to-be-compiled tex_files
 local tex_files = tablex.values(tex_fileinfos)
 
 
 log:debugf("Finding and sorting dependencies for %d tex_files", #tex_files)
 local to_be_compiled = files.sort_dependencies(tex_files, config.force_compilation)
+
+function filter_main_tex_files(tbl)
+  local result = {}
+  for _, entry in pairs(tbl) do
+      if entry.tex_type == "no-document" then
+        log:debugf("Removing non-document file %s", entry.relative_path)
+      else
+        table.insert(result, entry)
+      end
+  end
+  return result
+end
+
+to_be_compiled = filter_main_tex_files(to_be_compiled)
 if #to_be_compiled > 0 then
   log:status(#to_be_compiled.." files need compiling")
+    for _,file in ipairs(to_be_compiled) do
+      log:info(file.relative_path)
+    end
 else 
   log:status("No files need compiling")
 end
@@ -345,12 +384,14 @@ end
 
   if command == "clean" or command == "veryclean" then
     local n_files_deleted = 0
-    local to_be_cleaned_extensions = tablex.copy(config.clean)
+    local to_be_cleaned_extensions = tablex.copy(config.clean_extensions)
+    local to_be_cleaned_infixes = tablex.copy(config.clean_infixes)
 
-    if args.compile ~= "none" then
-      tablex.insertvalues(to_be_cleaned_extensions, utils.split(args.compile,','))   -- append arrays ...
-      log:info("Appending extra extension(s) to be cleaned " .. args.compile)
-    end
+    -- if args.compile ~= "none" then      -- if explicitly given compilers, only clean those infixes
+    --   -- to_be_cleaned_infixes = utils.split(args.compile,',')
+    --   config.clean_infixes   = get_infixes_for_keys(config.compilers, config.compile_sequence)
+    --   log:info("Infixes to be cleaned: " .. args.compile)
+    -- end
     
     if command == "veryclean" then
       -- log:debug("Appending extra extensions")
@@ -358,11 +399,12 @@ end
       tablex.insertvalues(to_be_cleaned_extensions, { "aux", "toc", "log", "dlog", "xref", "jax", "xmjax", "sagetex.sage", "html.failed", "pdf.failed" })   -- append arrays ...
       log:debugf("Appended extra extensions %s", table.concat(to_be_cleaned_extensions, ', '))
     end
-    log:status("Cleaning files ", table.concat(to_be_cleaned_extensions, ', '))
+
+    log:statusf("Cleaning %s files with extensions ", table.concat(to_be_cleaned_infixes, ', '),table.concat(to_be_cleaned_extensions, ', '))
     
     for _,file in ipairs(tex_files) do
       log:tracef("Removing temp files for %s", file.relative_path)
-      n_files_deleted = n_files_deleted  + compile.clean(file, to_be_cleaned_extensions, config.check)
+      n_files_deleted = n_files_deleted  + compile.clean(file, to_be_cleaned_extensions, to_be_cleaned_infixes, config.check)
     end
 
     -- require 'pl.pretty'.dump(config)
@@ -373,36 +415,42 @@ end
 
       
   -- TODO: fix commands (cfr xmlatex/xmlatex/lua)
-  if command == "bake" or command == "compilePdf" or command ==  "compile" then
-    log:status("Start "..command)
-
-    if command == "compilePdf" then
-      log:info("Compile only PDF")
-      config.compile_sequence = { "pdf" }
-    end
-    if command == "compile" then
-      log:info("Compile only HTML")
-      config.compile_sequence = { "draft.html" }
-    end
-
-    local all_statuses = {}
-    if #to_be_compiled == 0 then
-      log:status("Nothing to be baked")
-    else
+if command == "bake" or command == "compilePdf" or command ==  "compile" then
+  log:status("Start "..command)
+  if command == "compilePdf" then
+    log:info("Compile only PDF")
+    config.compile_sequence = { "pdf" }
+    config.output_formats   = get_extensions_for_keys(config.compilers, config.compile_sequence)
+  end
+  if command == "compile" then
+    log:info("Compile only HTML")
+    config.compile_sequence = { "draft.html" }
+    config.output_formats   = get_extensions_for_keys(config.compilers, config.compile_sequence)
+  end
+  local all_statuses = {}
+  if #to_be_compiled == 0 then
+    log:status("Nothing to be baked")
+  else
+    -- compile all to_be_complied files. TODO: make parallel!
+    local start_time =  socket.gettime()
     for i, file in ipairs(to_be_compiled) do
-      log:statusf("Compiling file %3d/%d: %s", i, #to_be_compiled, file.absolute_path)
-
+      log:statusf("Compiling file %3d/%d: %s", i, #to_be_compiled, file.relative_path)
+  
       local statuses = compile.compile(file, config.compilers, config.compile_sequence, config.check)
-
+  
       table.insert(all_statuses,statuses)
-
+  
       -- Already now print the error(s); a summary should be repeated at the end
       compile.print_errors(statuses)
-      compile.clean(file, config.clean)
+      if config.noclean then
+        log:debugf("Skipping cleaning temp files")
+      else
+        compile.clean(file, config.clean_extensions,config.clean_infixes)
+      end
     end
+    local end_time =  socket.gettime()
 
-    log:statusf("All compilations finished")
-
+    log:statusf("Finished compiling %d files in %.1f seconds", #to_be_compiled, end_time - start_time)
 
     -- print all errors 
     local failed_files = {}
@@ -418,14 +466,22 @@ end
               log:errorf("[%10s] %s:%s %s [%s]", compile_info.compiler, compile_info.source_file, err.line, err.context,err.error)
   --            require 'pl.pretty'.dump(err)
             end
+        else
+          if compile_info.post_status then
+              log:errorf("[%10s] %s: %s", "post_command", compile_info.source_file, compile_info.post_message or "")
+              local _, n_errors = compile_info.post_message:gsub("\n", "")   -- HACK: number of lines equals number of errors ...
+              failed_files[compile_info.log_file] = n_errors
+          end
         end 
       end
     end
-
+    --
+    -- all compilations done; process/summarize errors
+    --
     if tablex.size(failed_files) == 0 then
-      log:infof("Baked %d files without finding errors", #to_be_compiled)
+      log:infof("Baked %d files, no errors found", #to_be_compiled)
     else
-      log:errorf("Baking %d failed with %d compilation%s failed", #to_be_compiled, tablex.size(failed_files), tablex.size(failed_files) == 1 and "" or "s")
+      log:errorf("Baked %d files, but %d compilation%s failed", #to_be_compiled, tablex.size(failed_files), tablex.size(failed_files) == 1 and "" or "s")
 
       for filename, errs in pairs(failed_files) do
             log:errorf("See logfile %s for %d errors", filename, errs)
@@ -434,8 +490,6 @@ end
     end
   end
 end    -- end baking
-
--- process commands that do not depend on collecting metadata
 
 if command == "frost" then
   log:status("Start " .. command)
@@ -462,11 +516,16 @@ if command == "extrainfo" then
   for i, file in ipairs(tex_files) do
     log:infof("Info for %s (%s)",file.filename,file.relative_path)
     
-        local dom, msg = html.load_html(file.relative_path:gsub("tex$", "html"))
+        local html_file =  files.get_fileinfo(file.relative_path:gsub("tex$", "html"))
+        local ret, msg = html.update_html_fileinfo(html_file)
         
-        file.labels = html.get_labels(dom)
-        for k,v in pairs(file.labels) do all_labels[k] = ( all_labels[k] or 0) + v end
+        for k,v in pairs(html_file.labels or {}) do 
+          log:infof("Adding %s to %s",v,k)
+          all_labels[k] = ( all_labels[k] or 0) + v 
+        end
   end
-  require 'pl.pretty'.dump(all_labels)
-
+  if all_labels ~= {} then
+      log:infof("Potentially duplicate labels:")
+      require 'pl.pretty'.dump(all_labels)
+  end
 end
