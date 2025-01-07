@@ -269,7 +269,7 @@ config = {
 -- set/add potential default dependencies
 if not config.default_dependencies and path.exists("xmPreamble.tex") then
   log:info("Adding default dependency xmPreamble.tex")
-  config.default_dependencies = { files.get_fileinfo("xmPreamble.tex") }
+  config.default_dependencies = { "xmPreamble.tex" }
 else
   config.default_dependencies = {}
 end
