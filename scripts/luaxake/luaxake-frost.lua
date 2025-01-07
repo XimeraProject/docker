@@ -142,7 +142,7 @@ local function frost(tex_files, to_be_compiled_files)
             -- require 'pl.pretty'.dump(to_be_compiled)
 
             -- Store xourses, they have to be added explicitly to metadata.json
-            if tex_file.tex_type == "xourse" then
+            if tex_file.tex_documentclass == "xourse" then
                 log:info("Adding XOURSE "..tex_file.relative_path.." ("..html_file.title..")")
                 tex_xourses[html_file.relative_path:gsub(".html","")] = { title = html_file.title, abstract = html_file.abstract } 
             end
