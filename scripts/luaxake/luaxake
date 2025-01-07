@@ -215,6 +215,7 @@ config = {
     include=true, 
     includeonly=true,
     activity=true, 
+    practice=true, 
     activitychapter=true, 
     activitysection=true, 
     practicechapter=true, 
