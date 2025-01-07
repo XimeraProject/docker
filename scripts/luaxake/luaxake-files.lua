@@ -221,12 +221,11 @@ local function needs_compiling(tex, outfile)
   else
   for filename, subfile in pairs(tex.depends_on_files or {}) do
     log:tracef("Check modified of subfile %s", subfile.relative_path)
-    if not subfile or not subfile.relative_path or not subfile.modified then
-        log:warning("Incomplete data for dependency of %s",tex.relative_path)
-        pl.pretty.dump(subfile)
-    end
-    if subfile.modified > outfile.modified then
-      log:tracef("Dependent file %s has changed since compilation of %s",subfile.relative_path,  outfile.relative_path)
+    if not subfile.modified then
+        log:warningf("No modified info for dependency %s of %s",filename,tex.relative_path)
+        -- pl.pretty.dump(subfile)
+    elseif subfile.modified > outfile.modified then
+      log:tracef("Dependent file %s has changed since compilation of %s", subfile.relative_path,  outfile.relative_path)
       status = status or subfile.modified > outfile.modified
     end
   end
