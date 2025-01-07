@@ -269,11 +269,11 @@ EOF
     d ) DEBUG=1
         VERBOSE="-v"
         XAKE="$XAKE -v"
-        LUAXAKE="$LUAXAKE -l debug "
+        LUAXAKE="$LUAXAKE -d"
       ;;
     v ) VERBOSE="-v" 
         XAKE="$XAKE -v"
-        LUAXAKE="$LUAXAKE -l info "
+        LUAXAKE="$LUAXAKE -v"
       ;;
     s ) XAKE="$XAKE --skip-mathjax"
       ;;      
