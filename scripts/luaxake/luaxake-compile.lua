@@ -81,17 +81,17 @@ local function compile(file, compilers, compile_sequence, only_check)
 
     if not command_metadata then
       log:errorf("No compiler defined for %s (%s); SKIPPING",extension,file.relative_path)
-      goto endofthiscompilation  -- nice: a goto-statement !!!
+      goto uptonextcompilation  -- nice: a goto-statement !!!
     end
     -- This could/should perhaps be handled higher up? Compilation of e.g. preamble.tex doe snot make sense ...
     if file.tex_type and file.tex_type == "no-document" then
       log:infof("Skipping %s compilation of non-tex-document %s",extension, file.relative_path)
-      goto endofthiscompilation 
+      goto uptonextcompilation 
     end
 
     if file.extension ~= "tex" then
       log:errorf("Can't compile non-tex file %s; SKIPPING, SHOULD PROBABLY NOT HAVE HAPPENED",file.relative_path)
-      goto endofthiscompilation 
+      goto uptonextcompilation 
     end
     
     if extension:match("html$") and ( file.relative_path:match("_pdf.tex$") or file.relative_path:match("_beamer.tex$") ) then
@@ -112,7 +112,7 @@ local function compile(file, compilers, compile_sequence, only_check)
           else         log:infof("Failed to fix dummy htmlfile %s: %s",filename,err)
           end
       end
-      goto endofthiscompilation 
+      goto uptonextcompilation 
     end
   
     --
@@ -134,7 +134,7 @@ local function compile(file, compilers, compile_sequence, only_check)
     -- sometimes compiler wants to check for the output file (like for sagetex.sage),
     if command_metadata.check_file and not path.exists(output_file) then
       log:debugf("Skipping compilation because of 'check_file', and file %s does not exist",output_file)
-      goto endofthiscompilation  -- nice: a goto-statement !!!
+      goto uptonextcompilation  -- nice: a goto-statement !!!
     end
     
     if not output_file.needs_compilation then
@@ -196,12 +196,27 @@ local function compile(file, compilers, compile_sequence, only_check)
         local errors = parse_log_file(log_file)  -- gets errors the make4ht-way !
         compile_info.errors = errors
         
+        local err_context = ""
+        local err_line = ""
         for i, err in ipairs(errors or {}) do
-          if i>5 then
+          if i>10 then
             log:errorf("... skipping further errorlog; %d errors found", #errors)
             break
           end
-          log:errorf("%-20s: %s [[%s]]", log_file, err.error, err.context)
+
+          -- Format errormessage a bit, and store it in err.constructed_errormessage
+          -- remove useless context ...
+          err_context  = "at "..err.context
+          err_line = ""
+          if err.line then err_line = "[l." .. err.line .. "]" end
+
+          if err.context:match('See the LaTeX manual or LaTeX Companion for explanation') 
+          or err.context:match('^ <-') then
+            err_context = ""
+          end
+          
+          err.constructed_errormessage =  string.format("%s %-30s %s", err_line,  err.error, err_context)
+          log:errorf("%-20s:%s", log_file, err.constructed_errormessage)
         end
       end
 
@@ -255,6 +270,8 @@ local function compile(file, compilers, compile_sequence, only_check)
       -- require 'pl.pretty'.dump(file)
     end
       
+    ::endofthiscompilation::
+
     table.insert(statuses, compile_info)
     
     log:infof("Compilation of %s took %.1f seconds (%.20s)", output_file, compilation_time, file.title)
@@ -262,27 +279,27 @@ local function compile(file, compilers, compile_sequence, only_check)
     lfs.chdir(current_dir)
 
     log:tracef("Ended compilation %s, chdir back to %s", extension, current_dir)
-    ::endofthiscompilation::
+    ::uptonextcompilation::
   end
 
   return statuses
 end
 
 
---- print error messages parsed from the LaTeX log
----@param errors table
-local function print_errors(statuses)
-  for _, status in ipairs(statuses) do
-    local errors = status.errors or {}
-    if #errors > 0 then
-      log:error("Errors from " .. status.command .. ":")
-      for _, err in ipairs(errors) do
-        log:errorf("%20s line %s: %s", status.source_file or "?", err.line or "?", err.error)
-        log:error(err.context)
-      end
-    end
-  end
-end
+-- --- print error messages parsed from the LaTeX log
+-- ---@param errors table
+-- local function print_errors(statuses)
+--   for _, status in ipairs(statuses) do
+--     local errors = status.errors or {}
+--     if #errors > 0 then
+--       log:error("Errors from " .. status.command .. ":")
+--       for _, err in ipairs(errors) do
+--         log:errorf("%20s line %s: %s", status.source_file or "?", err.line or "?", err.error)
+--         log:error(err.context)
+--       end
+--     end
+--   end
+-- end
 
 --- remove temporary files
 ---@param basefile fileinfo 
@@ -309,7 +326,6 @@ local function clean(basefile, extensions, infixes, only_check)
 end
 
 M.compile      = compile
-M.print_errors = print_errors
 M.clean        = clean
 
 return M

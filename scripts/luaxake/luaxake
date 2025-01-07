@@ -452,8 +452,6 @@ if command == "bake" or command == "compilePdf" or command ==  "compile" then
   
       table.insert(all_statuses,statuses)
   
-      -- Already now print the error(s); a summary should be repeated at the end
-      compile.print_errors(statuses)
       if config.noclean then
         log:debugf("Skipping cleaning temp files")
       else
@@ -475,12 +473,14 @@ if command == "bake" or command == "compilePdf" or command ==  "compile" then
             failed_files[compile_info.log_file] = #(compile_info.errors)
 
             for _, err in ipairs(compile_info.errors) do
-              log:errorf("[%10s] %s:%s %s [%s]", compile_info.compiler, compile_info.source_file, err.line, err.context,err.error)
+              -- log:errorf("[%10s] %s:%s %s [%s]", compile_info.compiler, compile_info.source_file, err.line, err.context,err.error)
+              log:errorf("[%-10s] %s:%s", compile_info.compiler, compile_info.source_file, err.constructed_errormessage)
+
   --            require 'pl.pretty'.dump(err)
             end
         else
           if compile_info.post_status then
-              log:errorf("[%10s] %s: %s", "post_command", compile_info.source_file, compile_info.post_message or "")
+              log:errorf("[%-10s] %s: %s", "post_command", compile_info.source_file, compile_info.post_message or "")
               local _, n_errors = compile_info.post_message:gsub("\n", "")   -- HACK: number of lines equals number of errors ...
               failed_files[compile_info.log_file] = n_errors
           end
@@ -493,7 +493,7 @@ if command == "bake" or command == "compilePdf" or command ==  "compile" then
     if tablex.size(failed_files) == 0 then
       log:infof("Baked %d files, no errors found", #to_be_compiled)
     else
-      log:errorf("Baked %d files, but %d compilation%s failed", #to_be_compiled, tablex.size(failed_files), tablex.size(failed_files) == 1 and "" or "s")
+      log:warningf("Baked %d files, but %d compilation%s failed", #to_be_compiled, tablex.size(failed_files), tablex.size(failed_files) == 1 and "" or "s")
 
       for filename, errs in pairs(failed_files) do
             log:errorf("See logfile %s for %d errors", filename, errs)
