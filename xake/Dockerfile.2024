@@ -112,7 +112,7 @@ WORKDIR /root/texmf/tex/latex
 
 RUN git clone https://github.com/XimeraProject/ximeraLatex.git 
 WORKDIR /root/texmf/tex/latex/ximeraLatex
-RUN git pull && git checkout development
+RUN git pull && git checkout luaxake
 
 ADD scripts/xmlatex-lua /usr/local/bin/xmlatex
 ADD scripts/xmlatex     /usr/local/bin/xmlatex.xake
