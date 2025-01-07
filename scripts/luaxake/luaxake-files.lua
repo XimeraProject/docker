@@ -170,38 +170,6 @@ function filter_tex_files(tbl)
   return result
 end
 
---- get TeX documentclass ( and thus can it be compiled standalone, is it a ximera or a xourse)
---- @param file fileinfo the tested TeX file
---- @param linecount number maximum number of lines that should be tested to find \documentclass
---- @return string tex_type the documentclass, or 'no-document'
-local function get_tex_type(file, linecount)
-  -- we assume that the main TeX file contains \documentclass near beginning of the file 
-  linecount = linecount or 30 -- number of lines that will be read
-  local filename = file.absolute_path
-  local line_no = 0
-
-  local f, msg = io.open(filename, "r")
-  if not f then
-    log:warningf("Could not open file %s: %s",filename, msg)
-    return 'no-document'
-  end
-
-  for line in io.lines(filename) do    -- TODO: test existence of file!
-    line_no = line_no + 1
-    if line_no > linecount then 
-      return 'no-document'
-    end
-    -- TODO: quid comments ???
-    local class_name = line:match("\\documentclass%s*%[[^]]*%]%s*{([^}]+)}")
-                    or line:match("\\documentclass%s*{([^}]+)}")
-    if class_name then
-      -- log:trace("Document class: " .. class_name)
-      return class_name
-    end
-  end
-  return 'no-document'
-end
-
 --- Detect if the output file needs recompilation
 ---@param tex fileinfo metadata of the main TeX file to be compiled
 ---@param outfile fileinfo metadata of the output file
@@ -245,7 +213,7 @@ local function update_depends_on_files(fileinfo)
   for _, dep in ipairs(config.default_dependencies or {}) do
     log:tracef("Updating default dependency for %s: %s",filename, dep)
     local dep_fileinfo = get_fileinfo(dep)
-    dep_fileinfo.tex_type = 'no-document'      -- HACK: prevent compilation later
+    dep_fileinfo.tex_documentclass = false      -- HACK: prevent compilation later
     fileinfo.depends_on_files[dep] = get_fileinfo(dep)
   end
 
@@ -260,17 +228,25 @@ local function update_depends_on_files(fileinfo)
     -- remove all comments   (otherwise also commented commands would be processed!)
     -- content = content:gsub("([^\\])%%.-\n", "%1\n")
     content = content:gsub("%%[^\n]*", "")
+
+    fileinfo.tex_documentclass = false    -- default, might be overwritten infra
     -- loop over all LaTeX commands with arguments
     for command, argument in content:gmatch("\\(%w+)%s*{([^%}]+)}") do
       -- add dependency if the current command is \input like
       --- local metadata = nil    -- should be fileinfo ...
       local included_file = nil
       local wanted_extension = nil
-      if command == "dependsonpdf" then
+      if command == "documentclass" then
+        log:debugf("%s has documentclass %s", filename, argument)
+        fileinfo.tex_documentclass = argument
+      elseif command == "title" or command == "xmtitle" then 
+        log:debugf("%s has title %s", filename, argument)
+        fileinfo.has_title = true
+      elseif command == "dependsonpdf" then
         -- hack to include PDF (or SVG) eg of cheatsheets (that can/should not converted to HTML)
         included_file = fileinfo.relative_path:gsub(".tex","_pdf.tex")
         wanted_extension = "pdf"
-      elseif config.input_commands[command] then
+      elseif fileinfo.tex_documentclass and config.input_commands[command] then   -- only process inputs AFTER the documentclass (and thus not INSIDE preambles etc) !!!
         -- log:tracef("Consider %s{%s}", command, argument)
         included_file = path.normpath(current_dir.."/"..argument)     -- remove potential ../ 
         wanted_extension = "html"    -- because the html will/might be read to get 
@@ -425,23 +401,12 @@ end
 function update_status_tex_file(metadata, output_formats, compilers)
     log:tracef("update_status_tex_file %s (for output_formats=%s and compilers=%s)", metadata.relative_path, table.concat(output_formats,', '), table.concat(compilers,', '))
 
-    local tex_fileinfos = {}
-    metadata.tex_type = get_tex_type(metadata, config.documentclass_lines)     -- ximera, xourse, no-document 
-    -- update metadata with a list of included TeX files, and store it in tex_fileinfos
-
-    --- tex_fileinfos[metadata.relative_path] = metadata -- DO NOT RETURN 
-
-    if metadata.tex_type == "no-document" then
-      log:tracef("%s has no documentclass; skipping dependencies/output etc", metadata.relative_path)
-  
+    update_depends_on_files(metadata)
+    if not metadata.tex_documentclass then
+        log:tracef("%s has no documentclass; skipping output etc", metadata.relative_path)
+    
     else
-
-      update_depends_on_files(metadata)
-      -- for fname, finfo in pairs(metadata.depends_on_files) do
-      --   log:tracef("Adding to tex_fileinfo:  %s (dependend file of %s)", fname, metadata.relative_path)
-      --   tex_fileinfos[fname] = finfo
-      -- end
-      -- check for the need compilation
+        -- check for the need compilation
       update_output_files(metadata, output_formats, compilers)
       -- try to find the TeX4ht .cfg file
       -- to speed things up, we will find it only for files that needs a compilation

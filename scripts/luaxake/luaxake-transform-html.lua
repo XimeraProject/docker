@@ -425,7 +425,7 @@ local function post_process_html(src, file, cmd_meta, root_dir)
   local ret, msg =  update_html_fileinfo(file, dom)     -- not really 'post-processing', but implicit checking-of-gebnerated-images
   if ret then return ret, msg end
 
-  if not file.title or file.title == "" then
+  if file.has_title and ( not file.title or file.title == "" ) then
     log:warningf("No title found in %s; recompiling once more might solve this ...", file.relative_path)
     return "RETRY_COMPILATION", "No title generated for ".. file.relative_path
   end

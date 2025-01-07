@@ -363,7 +363,7 @@ local to_be_compiled = files.sort_dependencies(tex_files, config.force)
 function filter_main_tex_files(tbl)
   local result = {}
   for _, entry in pairs(tbl) do
-      if entry.tex_type == "no-document" then
+      if not entry.tex_documentclass then
         log:debugf("Removing non-document file %s", entry.relative_path)
       else
         table.insert(result, entry)
@@ -412,7 +412,7 @@ end
       log:debugf("Appended extra extensions %s", table.concat(to_be_cleaned_extensions, ', '))
     end
 
-    log:statusf("Cleaning %s files with extensions ", table.concat(to_be_cleaned_infixes, ', '),table.concat(to_be_cleaned_extensions, ', '))
+    log:statusf("Cleaning %s files with extensions %s", table.concat(to_be_cleaned_infixes, ', '),table.concat(to_be_cleaned_extensions, ', '))
     
     for _,file in ipairs(tex_files) do
       log:tracef("Removing temp files for %s", file.relative_path)
@@ -482,7 +482,7 @@ if command == "bake" or command == "compilePdf" or command ==  "compile" then
           if compile_info.post_status then
               log:errorf("[%-10s] %s: %s", "post_command", compile_info.source_file, compile_info.post_message or "")
               local _, n_errors = compile_info.post_message:gsub("\n", "")   -- HACK: number of lines equals number of errors ...
-              failed_files[compile_info.log_file] = n_errors
+              failed_files[compile_info.log_file] = n_errors + 1
           end
         end 
       end

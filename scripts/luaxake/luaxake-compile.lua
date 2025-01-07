@@ -84,7 +84,7 @@ local function compile(file, compilers, compile_sequence, only_check)
       goto uptonextcompilation  -- nice: a goto-statement !!!
     end
     -- This could/should perhaps be handled higher up? Compilation of e.g. preamble.tex doe snot make sense ...
-    if file.tex_type and file.tex_type == "no-document" then
+    if not file.tex_documentclass then
       log:infof("Skipping %s compilation of non-tex-document %s",extension, file.relative_path)
       goto uptonextcompilation 
     end
