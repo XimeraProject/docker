@@ -279,7 +279,7 @@ local function frost(tex_files, to_be_compiled_files)
     return ret, output
 end
 
-local function serve()
+local function serve(force_serving)
 
     local result, most_recent_publication = osExecute("git for-each-ref --sort=-creatordate --count=1 --format '%(tree) %(objectname) %(refname:strip=2)' refs/tags/publications/*")
 
@@ -304,12 +304,24 @@ local function serve()
     local ret, output = osExecute("git push  ximera "..tagName)
     if ret > 0 then
         log:tracef("Could not push to 'ximera' target: %s",output)
-        return ret,output
+        if force_serving then
+            log:debugf("Trying with more power (git push -f ...)")
+            ret, output = osExecute("git push -f ximera "..tagName)
+            if ret > 0 then
+                return ret,output
+            end
+        end
     end
     local ret, output =  osExecute("git push ximera "..tag_oid..":refs/heads/master")     -- HACK ???
     if ret > 0 then
         log:tracef("Could not push refs to 'ximera' target: %s",output)
-        return ret,output
+        if force_serving then
+            log:debugf("Trying with more power (git push -f ...)")
+            ret, output = osExecute("git push -f ximera "..tag_oid..":refs/heads/master") 
+            if ret > 0 then
+                return ret,output
+            end
+        end
     end
     
     log:statusf("Published %s to     %s", tagName, remote_ximera)

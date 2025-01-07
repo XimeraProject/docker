@@ -235,13 +235,13 @@ local function needs_compiling(tex, outfile)
   return status
 end
 
+
 --- update the list of files included in the given TeX file
 --- @param fileinfo fileinfo TeX file metadata
 --- @return 
 local function update_depends_on_files(fileinfo)
   local filename    = fileinfo.absolute_path
   local current_dir = fileinfo.absolute_dir
-  local extra_tex_files = {}
 
   for _, dep in ipairs(config.default_dependencies or {}) do
     fileinfo.depends_on_files[dep] = get_fileinfo(dep)
@@ -261,7 +261,7 @@ local function update_depends_on_files(fileinfo)
     -- loop over all LaTeX commands with arguments
     for command, argument in content:gmatch("\\(%w+)%s*{([^%}]+)}") do
       -- add dependency if the current command is \input like
-      local metadata = nil    -- should be fileinfo ...
+      --- local metadata = nil    -- should be fileinfo ...
       local included_file = nil
       local wanted_extension = nil
       if command == "dependsonpdf" then
@@ -283,7 +283,7 @@ local function update_depends_on_files(fileinfo)
             included_file = included_file..".tex"
           end
         end
-        log:debugf("Consider included file %s (rel %s)", included_file, path.relpath(included_file, current_dir))
+        log:debugf("%s: consider included file %s (rel %s)", filename, included_file, path.relpath(included_file, current_dir))
         included_file = path.relpath(included_file, GLOB_root_dir)      -- make relative path 
 
       else
@@ -292,39 +292,34 @@ local function update_depends_on_files(fileinfo)
 
       if included_file then
 
-          local fileinfo = get_fileinfo(included_file)
+          local included_fileinfo = get_fileinfo(included_file)
 
-          log:tracef("Getting tex_file_with_status for %s", included_file)
-          local extra_tex = update_status_tex_file(fileinfo, {wanted_extension}, {wanted_extension} )
-          for fname, finfo in pairs(extra_tex) do
-            metadata = finfo     --- BADBAD: only one 'dependency' properly supported here, but included_file migth itself depend on stuff!!!
-            log:tracef("Adding to tex_fileinfo:  %s (dependend file from %s)", fname, fileinfo.relative_path)
-            extra_tex_files[fname] = finfo
-          end
-        end 
-        if metadata then
-          if metadata.exists then
-            log:debugf("File %s depends on %s", fileinfo.relative_path, metadata.relative_path)
-            fileinfo.depends_on_files[metadata.absolute_path] = metadata
-            fileinfo.depends_on_files[metadata.relative_path] = metadata
-          else
-            log:warningf("File %s depends on non-existing file %s (%s); NOT ADDED TO DEPENDENT FILES", fileinfo.relative_path, metadata.relative_path, metadata.absolute_path)
+          log:debugf("File %s depends on %s", fileinfo.relative_path, included_file)
+          fileinfo.depends_on_files[included_file] = included_fileinfo
+
+
+          log:tracef("Getting tex_file_with_status for included file %s", included_file)
+          update_status_tex_file(included_fileinfo, {wanted_extension}, {wanted_extension} )
+          for fname, finfo in pairs(included_fileinfo.depends_on_files) do
+            if finfo.exists then
+              log:debugf("File %s indirectly depends on %s", fileinfo.relative_path, finfo.relative_path)
+              fileinfo.depends_on_files[finfo.relative_path] = finfo
+            else
+              log:warningf("File %s indirectly depends on non-existing file %s (%s); NOT ADDED TO DEPENDENT FILES", fileinfo.relative_path, finfo.relative_path, finfo.absolute_path)
+            end  
+  
           end
       end  -- included_file
-      -- next command ...
-    end
-  --log:debugf("tex_dependencies found %d dependencies for %s", tablex.size(fileinfo.depends_on_files), filename)
-  log:tracef("%s has dependencies %s", filename, table.concat(fileinfo.depends_on_files,', '))
-  return extra_tex_files
+    end  -- next command ...
+  log:tracef("%-30s has %2d dependencies %s", fileinfo.relative_path, tablex.size(fileinfo.depends_on_files), table.concat(tablex.keys(fileinfo.depends_on_files),', '))
+  log:debugf("%-40s has %3d dependencies"   , fileinfo.relative_path, tablex.size(fileinfo.depends_on_files))
 end
 
 
---- check if any output file needs a compilation
+--- sets metadata.output_files and metadata.needs_compilation (for given extensions as html, pdf, ..)
 --- @param metadata metadata metadata of the TeX file
 --- @param extensions table list of extensions
---- @return boolean needs_compilation true if the file needs compilation
---- @return output_file[] list of output files 
-local function check_output_files(metadata, extensions, compilers)
+local function update_output_files(metadata, extensions, compilers)
   local output_files = {}
   local tex_file = metadata.filename
   local needs_compilation = false
@@ -355,7 +350,8 @@ local function check_output_files(metadata, extensions, compilers)
     html_file.extension         = extension
     output_files[#output_files+1] = html_file
   end
-  return needs_compilation, output_files
+  metadata.needs_compilation = needs_compilation
+  metadata.output_files      = output_files
 end
 
 --- create sorted table of files that needs to be compiled 
@@ -372,21 +368,21 @@ local function sort_dependencies(tex_files, force_compilation)
   local to_be_compiled = {}
   -- first add all used files
   for _, metadata in ipairs(tex_files) do
-    log:tracef("Consider %s", metadata.absolute_path)
+    log:tracef("Consider %s", metadata.relative_path)
 
     if force_compilation or metadata.needs_compilation then
-      Graph:add_edge("root", metadata.absolute_path)
-      used[metadata.absolute_path] = metadata
+      Graph:add_edge("root", metadata.relative_path)
+      used[metadata.relative_path] = metadata
     end
   end
   
   -- now add edges to included files which needs to be recompiled
   for _, metadata in pairs(used) do
-    local current_name = metadata.absolute_path
+    local current_name = metadata.relative_path
     log:tracef("Get used = %s (%s)",current_name, tablex.keys(metadata.depends_on_files))
     for filename, child in pairs(metadata.depends_on_files or {}) do
     -- for _, child in ipairs(metadata.dependecies or {}) do
-      local name = child.absolute_path
+      local name = child.relative_path
       log:tracef("Get child = %s",name)
       -- add edge only to files added in the first run, because only these needs compilation
       if used[name] then
@@ -404,21 +400,26 @@ local function sort_dependencies(tex_files, force_compilation)
     log:errorf("Could not sort dependency Graph: %s", msg)
     log:errorf("RETURNING UNSORTED LIST")
     return tex_files
-  else
-    -- we need to save files in the reversed order, because these needs to be compiled first
+  end
+  
+  -- we need to save files in the reversed order, because these needs to be compiled first
   for i = #sorted, 1, -1 do
     local name = sorted[i]
-    log:tracef("Adding to be compiled %2d: %s",i,name)
-    to_be_compiled[#to_be_compiled+1] = used[name]
-  end
+    local usd = used[name]
+    local uname = ""
+    if name == "root" then
+      log:tracef("Skipping artificial 'root' node")
+    else
+      log:tracef("Adding to be compiled %2d: %-30s (%s)",i,name, used[name].relative_path)
+      to_be_compiled[#to_be_compiled+1] = used[name]
+    end
   end
   return to_be_compiled
 end
 
 
---- find TeX files that needs to be compiled in the directory tree
---- @param dir string root directory where we should find TeX files
---- @return metadata[] tex_files list of all TeX files found in the directory tree
+--- update the fileinfo ('metadata') of a tex-file, in particular the depends_on_files and output_files, for a given (set of) output_format(s)
+--- @param metadata fileinfo  fileinfo of TeX-file to be updated, 
 function update_status_tex_file(metadata, output_formats, compilers)
     log:tracef("update_status_tex_file %s (for output_formats=%s and compilers=%s)", metadata.relative_path, table.concat(output_formats,', '), table.concat(compilers,', '))
 
@@ -426,20 +427,20 @@ function update_status_tex_file(metadata, output_formats, compilers)
     metadata.tex_type = get_tex_type(metadata, config.documentclass_lines)     -- ximera, xourse, no-document 
     -- update metadata with a list of included TeX files, and store it in tex_fileinfos
 
-    tex_fileinfos[metadata.relative_path] = metadata
+    --- tex_fileinfos[metadata.relative_path] = metadata -- DO NOT RETURN 
 
     if metadata.tex_type == "no-document" then
       log:tracef("%s has no documentclass; skipping dependencies/output etc", metadata.relative_path)
+  
     else
 
-      for fname, finfo in pairs(update_depends_on_files(metadata)) do
-        log:tracef("Adding to tex_fileinfo:  %s (dependend file of %s)", fname, metadata.relative_path)
-        tex_fileinfos[fname] = finfo
-      end
+      update_depends_on_files(metadata)
+      -- for fname, finfo in pairs(metadata.depends_on_files) do
+      --   log:tracef("Adding to tex_fileinfo:  %s (dependend file of %s)", fname, metadata.relative_path)
+      --   tex_fileinfos[fname] = finfo
+      -- end
       -- check for the need compilation
-      local status, output_files = check_output_files(metadata, output_formats, compilers)
-      metadata.needs_compilation = status
-      metadata.output_files = output_files
+      update_output_files(metadata, output_formats, compilers)
       -- try to find the TeX4ht .cfg file
       -- to speed things up, we will find it only for files that needs a compilation
       if metadata.needs_compilation then
@@ -455,12 +456,12 @@ function update_status_tex_file(metadata, output_formats, compilers)
         log:debugf("%-12s %18s: %s", metadata.extension,  status and 'NEEDS_COMPILATION' or 'OK', metadata.relative_path)
       end
     end
-    return tex_fileinfos
+    -- return tex_fileinfos
 end
 
 --- find TeX files that needs to be compiled in the directory tree
 --- @param dir string root directory where we should find TeX files
---- @return metadata[] tex_files list of all TeX files found in the directory tree
+--- @return metadata[] tex_files list of all these TeX files AND THE FILES THEY MIGHT DEPEND ON (potentially in OTHER directories)
 function get_tex_files_with_status(dir, output_formats, compilers)
   log:debugf("Getting tex files in %s (for output_formats=%s and compilers=%s)", dir, table.concat(output_formats,', '), table.concat(compilers,', '))
   local files = get_files(dir, {})
@@ -469,14 +470,16 @@ function get_tex_files_with_status(dir, output_formats, compilers)
   local tex_fileinfos = {}
   -- now check which output files needs a compilation
   for _, metadata in ipairs(tex_files) do
-    for fname, finfo in pairs(update_status_tex_file(metadata, output_formats, compilers)) do
-      log:tracef("Adding to tex_fileinfo:  %s", fname)
+    tex_fileinfos[metadata.relative_path] = metadata
+    log:tracef("Adding main file to tex_fileinfo:  %s", metadata.relative_path)
+    update_status_tex_file(metadata, output_formats, compilers)    -- collect depends_on_files ...
+    for fname, finfo in pairs(metadata.depends_on_files) do
+      log:tracef("Adding dependend file to tex_fileinfo:  %s", fname)
       tex_fileinfos[fname] = finfo
     end
     
   end
 
-  -- -- SKIPPED: create ordered list of files that needs to be compiled
   return tex_fileinfos
 end
 

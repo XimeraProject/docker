@@ -30,9 +30,13 @@ $ luaxake [command dirs]
 
 Options: 
 -h,--help                            Print help message
--l,--loglevel  (default info)        Set log level: trace, debug, info, status, warning, error, fatal
--s,--settings  (default none)        Luaxake settings script
--v,--version                         Version info
+-l,--loglevel                        Set log level: trace, debug, info, status, warning, error, fatal
+-s,--silent                          Set log level to 'status'
+-v,--verbose                         Set log level to 'info'
+-d,--debug                           Set log level to 'debug'
+-t,--trace                           Set log level to 'trace'
+--settings     (default none)        Luaxake settings script
+--version                            Version info
 -f,--force                           Recompile anyway
 -C,--compile   (default none)        Compile sequence (default 'pdf,html', or as set in settings)
 --check                              Only check, no actual compiling/cleaning
@@ -64,7 +68,14 @@ if args.version then
   os.exit()
 end
 
-logging.set_level(args.loglevel)
+-- Highest level of -v, -d, -t wins, except that -l would overwrite it
+logging.set_level("info")    -- default
+if args.silent  then logging.set_level("status")  end
+if args.verbose then logging.set_level("info")  end
+if args.debug   then logging.set_level("debug") end
+if args.trace   then logging.set_level("trace") end
+
+if args.loglevel then logging.set_level(args.loglevel) end
 
 
 GLOB_root_dir = path.abspath(".")  -- TODO: find git folder ...?
@@ -265,9 +276,9 @@ end
 
 -- Store all args in config   (so that all args can also be specified in the config?)
 config.dirs = dirs
-if args.check   then config.check = args.check end
+if args.check   then config.check   = args.check end
 if args.noclean then config.noclean = args.noclean end
-if args.force   then config.force_compilation = args.force end;
+if args.force   then config.force   = args.force end;
 
 config.config_file = args.config
 if config.config_file ~= "ximera.cfg" then
@@ -332,8 +343,9 @@ for i,nextarg in ipairs(config.dirs) do
 
   if path.isdir(nextarg) or ( path.isfile(nextarg) and nextarg:match("%.tex$")  )then
     -- some files might need compilation even if they are not in the args, e.g. _pdf.tex files, or other dependent .tex files
+    
     for fname, finfo in pairs(files.get_tex_files_with_status(nextarg, config.output_formats, config.compile_sequence)) do
-      log:tracef("Adding to tex_fileinfo:  %s", fname)
+      log:tracef("Collecting into tex_fileinfos:  %s", fname)
       tex_fileinfos[fname] = finfo
     end
   else
@@ -346,7 +358,7 @@ local tex_files = tablex.values(tex_fileinfos)
 
 
 log:debugf("Finding and sorting dependencies for %d tex_files", #tex_files)
-local to_be_compiled = files.sort_dependencies(tex_files, config.force_compilation)
+local to_be_compiled = files.sort_dependencies(tex_files, config.force)
 
 function filter_main_tex_files(tbl)
   local result = {}
@@ -363,8 +375,8 @@ end
 to_be_compiled = filter_main_tex_files(to_be_compiled)
 if #to_be_compiled > 0 then
   log:status(#to_be_compiled.." files need compiling")
-    for _,file in ipairs(to_be_compiled) do
-      log:info(file.relative_path)
+    for i,file in ipairs(to_be_compiled) do
+      log:infof("%3d %s",i,file.relative_path)
     end
 else 
   log:status("No files need compiling")
@@ -502,7 +514,7 @@ end
 
 if command == "serve" then
   log:status("Start " .. command)
-  local ret, msg = frost.serve()  
+  local ret, msg = frost.serve(config.force)  
   if ret > 0 then
     log:error("Serve failed:", msg)
     os.exit(ret)
@@ -529,3 +541,4 @@ if command == "extrainfo" then
       require 'pl.pretty'.dump(all_labels)
   end
 end
+
