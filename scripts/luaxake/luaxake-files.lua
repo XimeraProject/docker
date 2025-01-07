@@ -243,6 +243,9 @@ local function update_depends_on_files(fileinfo)
   local current_dir = fileinfo.absolute_dir
 
   for _, dep in ipairs(config.default_dependencies or {}) do
+    log:tracef("Updating default dependency for %s: %s",filename, dep)
+    local dep_fileinfo = get_fileinfo(dep)
+    dep_fileinfo.tex_type = 'no-document'      -- HACK: prevent compilation later
     fileinfo.depends_on_files[dep] = get_fileinfo(dep)
   end
 
