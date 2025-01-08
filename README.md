@@ -1,3 +1,11 @@
+
+DO NOT USE
+
+This repo is OBSOLETE: see ximeraLatex repo !!!
+
+It will be archived soon...
+
+
 # Dockerfiles and docker images for Ximera
 
 In this repository contains files needed to *build* Docker images for Ximera. 
